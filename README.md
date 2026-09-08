@@ -40,9 +40,9 @@ yellow, otherwise green. Sessions with no update for 12 hours are pruned.
 ## Install
 
 1. Run the installer from `target/release/bundle/`:
-   - `AI Traffic Lights_1.1.1_x64-setup.exe` — NSIS, per-user, no admin
+   - `AI Traffic Lights_1.1.2_x64-setup.exe` — NSIS, per-user, no admin
      required, installs to `%LOCALAPPDATA%\AI Traffic Lights\`
-   - `AI Traffic Lights_1.1.1_x64_en-US.msi` — MSI, per-machine, needs admin
+   - `AI Traffic Lights_1.1.2_x64_en-US.msi` — MSI, per-machine, needs admin
 2. Register the Claude Code hooks:
 
    ```powershell
@@ -74,10 +74,11 @@ rather paste it in by hand.
 
 - **Move** — drag the housing anywhere.
 - **Resize** — drag the trailing edge (the bottom when vertical, the right when
-  horizontal), or hold <kbd>Ctrl</kbd> and scroll. Only the long side is
-  draggable: the short side follows it, staying on the traffic-light proportion
-  throughout the drag, so the casing always fits the lamps exactly with no
-  background showing beside them.
+  horizontal), or hold <kbd>Ctrl</kbd> and scroll. Only that one edge resizes,
+  and only the long side is dragged: the short side follows it, staying on the
+  traffic-light proportion throughout the drag, so the casing always fits the
+  lamps exactly with no background showing beside them. No other edge or corner
+  resizes — dragging anywhere else on the light moves it.
 - **Right-click** — settings, always-on-top toggle, rotate, size presets, reset
   to green, hide to tray, quit.
 - **Tray icon** — show, hide, settings or quit. Hovering it shows the current
@@ -172,11 +173,14 @@ settings apply live.
 The light's right-click menu is a native menu built in Rust. The window is
 smaller than any useful menu, so an HTML one would be clipped by the webview.
 
-Dragging the window edge is a native resize — wry hit-tests the border of a
-borderless resizable window itself, so the webview never sees that press and the
-OS moves only the edge being pulled. The short side is therefore corrected on
-every resize event rather than once the drag settles; correcting it late left
-the window off-ratio for the whole gesture and then snapped.
+Resizing is driven entirely from the frontend, and the window is declared
+`resizable: false` so that the OS cannot resize it at all. A native resize moves
+only the edge being pulled, which cannot work here: the short side is derived
+from the long one, so both axes have to move together on every frame. While the
+window was resizable, wry hit-tested its border itself — a borderless resizable
+window gets that for free — and the press never reached the webview, so the OS
+dragged one edge while our correction pulled the other back, and the window
+flickered between the two sizes for the whole gesture.
 
 ## Troubleshooting
 

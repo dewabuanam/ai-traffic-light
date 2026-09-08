@@ -78,14 +78,9 @@ function layout() {
 /* ---------------- window size ---------------- */
 
 // The short axis is derived from the long one, so the housing always fits the
-// lamps exactly and no background shows beside them.
-//
-// Dragging the window edge is a native resize: wry hit-tests the border of a
-// borderless resizable window itself, so the webview never sees that press and
-// the OS moves only the edge being pulled. The correction therefore has to go
-// out on every resize event rather than once the drag settles — debouncing it
-// left the window off-ratio for the whole gesture and then snapped, which is
-// the jump you could see.
+// lamps exactly and no background shows beside them. Every resize therefore has
+// to move both axes together, which is why the window is not resizable by the
+// OS (see `resizable` in `tauri.conf.json`) and the grip below drives it all.
 let drag = null;
 
 // The last size we asked for, so our own change echoing back is not mistaken
@@ -134,25 +129,15 @@ function onResized(physical) {
   const w = Math.round(physical.width / scale);
   const h = Math.round(physical.height / scale);
 
+  // Our own change echoing back: only the lamps need re-fitting.
   if (requested && Math.abs(requested.w - w) <= 1 && Math.abs(requested.h - h) <= 1) {
     layout();
     return;
   }
 
-  const along = prefs.orientation === "horizontal" ? w : h;
-
-  // Anything under the minimum is a window that is hiding, minimising or being
-  // torn down rather than a resize. Restore the size, and never write it down.
-  if (!(along >= MIN_ALONG)) {
-    resizeFromPrefs();
-    return;
-  }
-
-  const next = Math.min(along, MAX_ALONG);
-  if (next !== prefs.along) {
-    prefs.along = next;
-    saveSoon();
-  }
+  // Nothing else is meant to resize this window, so a size we did not ask for
+  // is the window being shown, hidden, or moved to a screen at another scale.
+  // Put it back on the ratio, and never write it down as the user's size.
   resizeFromPrefs();
 }
 
@@ -166,12 +151,19 @@ window.addEventListener("resize", layout);
 
 /* ---------------- resizing ---------------- */
 
-// The drag is driven here rather than handed to `startResizeDragging`, because
-// the OS drag moves only the edge being pulled. With the short side locked to
-// the long one, that left the window off-ratio for the whole gesture — a dark
-// band opening up beside the lamps — and any correction sent mid-drag fought
-// the OS drag loop and made the window jump. Doing it ourselves keeps both
-// axes in step on every frame.
+// The drag is driven here rather than by the OS, because an OS drag moves only
+// the edge being pulled. With the short side locked to the long one, that left
+// the window off-ratio for the whole gesture — a dark band opening up beside
+// the lamps — and any correction sent mid-drag fought the OS drag loop and made
+// the window flicker between the two widths. Doing it ourselves keeps both axes
+// in step on every frame.
+//
+// The window is `resizable: false` so that no OS drag can start at all. While
+// it was resizable, wry hit-tested the border itself and claimed the outermost
+// few pixels of the grip — including its two corners, where the OS resized the
+// short axis too and the correction fought it hardest. That is the same strip
+// of pixels this handler needs, so the two paths were racing for every press
+// near the end of the grip.
 grip.addEventListener("pointerdown", (event) => {
   if (event.button !== 0) return;
   event.preventDefault();

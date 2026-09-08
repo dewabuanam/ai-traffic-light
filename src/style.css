@@ -156,7 +156,9 @@ body[data-housing="none"] {
 /* ---------- resize grip ---------- */
 
 /* The resize handle: the whole trailing edge, since only the long axis is
-   draggable. Dragging it is handled in JS so both axes move together. */
+   draggable. Dragging it is handled in JS so both axes move together — and the
+   window is not OS-resizable, so no border hit-test claims the outer pixels of
+   this strip out from under the handler. */
 .grip {
   position: fixed;
   z-index: 5;

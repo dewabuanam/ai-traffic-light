@@ -21,7 +21,8 @@ use std::time::{Duration, Instant};
 
 use serde_json::Value;
 use tauri::{
-    AppHandle, Manager, WebviewUrl, WebviewWindowBuilder, WindowEvent,
+    AppHandle, LogicalPosition, Manager, WebviewUrl, WebviewWindow, WebviewWindowBuilder,
+    WindowEvent,
 };
 
 use ai_traffic_lights_core::snapshot;
@@ -44,6 +45,13 @@ const BIRTH_SIZE: (f64, f64) = (103.0, 292.0);
 /// A moved window is written down at most this often. `Moved` arrives for every
 /// pixel of a drag, and this is a file write.
 const SAVE_EVERY: Duration = Duration::from_millis(800);
+
+/// The space left between two lights placed next to each other.
+const NEXT_GAP: f64 = 12.0;
+
+/// How far to keep looking for a free spot beside the existing lights before
+/// giving up and using the default corner instead.
+const MAX_STEPS: usize = 12;
 
 /// One live light window.
 struct Light {
@@ -86,6 +94,11 @@ pub struct Lights {
     by_session: Mutex<HashMap<String, Light>>,
     hidden: AtomicBool,
     places: Places,
+    /// Windows that are where they are meant to be. A light only counts as
+    /// something to sit beside once it has been placed — at startup several
+    /// windows load at once, and stepping away from one still sitting at its
+    /// birth position would scatter them.
+    settled: Mutex<Vec<String>>,
 }
 
 /// Where each light was last left, by project and slot.
@@ -160,6 +173,7 @@ impl Lights {
             by_session: Mutex::new(HashMap::new()),
             hidden: AtomicBool::new(false),
             places: Places::load(app.path().app_config_dir().ok()),
+            settled: Mutex::new(Vec::new()),
         }
     }
 
@@ -315,6 +329,9 @@ pub fn sync(app: &AppHandle) {
                 let _ = window.close();
             }
         }
+        if let Ok(mut settled) = lights.settled.lock() {
+            settled.retain(|label| !closing.contains(label));
+        }
         if !closing.is_empty() {
             lights.places.flush();
         }
@@ -358,6 +375,10 @@ fn open(app: &AppHandle, session: &str, label: &str, place: &str, hidden: bool) 
 
     if let Some((x, y)) = remembered {
         builder = builder.position(x, y);
+        // Already where it belongs, so the next light can measure from it.
+        if let Ok(mut settled) = lights.settled.lock() {
+            settled.push(label.to_string());
+        }
     }
 
     let window = match builder.build() {
@@ -432,6 +453,231 @@ pub fn set_visible(app: &AppHandle, visible: bool) {
 
 pub fn hidden(app: &AppHandle) -> bool {
     app.state::<Lights>().hidden.load(Ordering::Relaxed)
+}
+
+/// One light's rectangle, in logical pixels relative to the work area, with the
+/// slot that says how long it has been there.
+struct Spot {
+    slot: usize,
+    x: f64,
+    y: f64,
+    w: f64,
+    h: f64,
+}
+
+impl Spot {
+    fn overlaps(&self, x: f64, y: f64, w: f64, h: f64) -> bool {
+        // A hair of tolerance, so two lights sitting exactly edge to edge are
+        // not called an overlap.
+        self.x < x + w - 1.0
+            && x < self.x + self.w - 1.0
+            && self.y < y + h - 1.0
+            && y < self.y + self.h - 1.0
+    }
+}
+
+/// Move a light to where it belongs.
+///
+/// With `beside`, a light that has never been placed joins the lights already
+/// on screen — one step along from the one that has been there longest — so a
+/// new session appears next to the row the user has arranged. Without it, and
+/// when there is nothing to sit beside, it goes to the default corner.
+///
+/// The corner is worked out here rather than in the frontend because it has to
+/// be measured against the monitor's *work area*, the screen minus the taskbar,
+/// which the webview cannot see: a light placed bottom-right from JS would sit
+/// behind the taskbar.
+pub fn place(
+    app: &AppHandle,
+    label: &str,
+    corner: &str,
+    margin: f64,
+    beside: bool,
+) -> Result<(), String> {
+    let window = app
+        .get_webview_window(label)
+        .ok_or_else(|| format!("no window {label}"))?;
+
+    // `current_monitor` is the one the light is on now; a window that has not
+    // been shown yet has none, so fall back to the primary.
+    let monitor = window
+        .current_monitor()
+        .map_err(|e| e.to_string())?
+        .or(window.primary_monitor().map_err(|e| e.to_string())?)
+        .ok_or_else(|| "no monitor".to_string())?;
+
+    let scale = monitor.scale_factor();
+    let area = monitor.work_area();
+    let screen = area.size.to_logical::<f64>(scale);
+    let origin = area.position.to_logical::<f64>(scale);
+    let size = window
+        .outer_size()
+        .map_err(|e| e.to_string())?
+        .to_logical::<f64>(scale);
+
+    // Never let the margin push a light off a screen too small for it.
+    let free_x = (screen.width - size.width).max(0.0);
+    let free_y = (screen.height - size.height).max(0.0);
+
+    let horizontal = orientation_is_horizontal(app);
+    let neighbours = settled_spots(app, label, origin.x, origin.y, scale);
+
+    let spot = if beside {
+        beside_neighbours(&neighbours, size.width, size.height, free_x, free_y, horizontal)
+    } else {
+        None
+    };
+
+    let (x, y) = spot.unwrap_or_else(|| {
+        corner_spot(
+            corner,
+            margin,
+            free_x,
+            free_y,
+            size.width,
+            size.height,
+            horizontal,
+            app.state::<Lights>().slot_of(label),
+        )
+    });
+
+    window
+        .set_position(LogicalPosition::new(origin.x + x, origin.y + y))
+        .map_err(|e| e.to_string())?;
+
+    if let Ok(mut settled) = app.state::<Lights>().settled.lock() {
+        if !settled.iter().any(|other| other == label) {
+            settled.push(label.to_string());
+        }
+    }
+    Ok(())
+}
+
+fn orientation_is_horizontal(app: &AppHandle) -> bool {
+    let prefs = app.state::<crate::Prefs>();
+    let value = match prefs.value.lock() {
+        Ok(value) => value.clone(),
+        Err(poisoned) => poisoned.into_inner().clone(),
+    };
+    value.get("orientation").and_then(Value::as_str) == Some("horizontal")
+}
+
+/// Every other light that is already where it belongs, relative to the work
+/// area so the numbers can be compared with a candidate position.
+fn settled_spots(app: &AppHandle, label: &str, ox: f64, oy: f64, scale: f64) -> Vec<Spot> {
+    let lights = app.state::<Lights>();
+    let settled = match lights.settled.lock() {
+        Ok(settled) => settled.clone(),
+        Err(poisoned) => poisoned.into_inner().clone(),
+    };
+
+    let mut out = Vec::new();
+    for window in windows(app) {
+        let other = window.label().to_string();
+        if other == label || !settled.contains(&other) {
+            continue;
+        }
+        let Some(spot) = spot_of(&window, ox, oy, scale, lights.slot_of(&other)) else {
+            continue;
+        };
+        out.push(spot);
+    }
+    out
+}
+
+fn spot_of(window: &WebviewWindow, ox: f64, oy: f64, scale: f64, slot: usize) -> Option<Spot> {
+    let position = window.outer_position().ok()?.to_logical::<f64>(scale);
+    let size = window.outer_size().ok()?.to_logical::<f64>(scale);
+    Some(Spot {
+        slot,
+        x: position.x - ox,
+        y: position.y - oy,
+        w: size.width,
+        h: size.height,
+    })
+}
+
+/// One step along from the light that has been on screen longest, in the
+/// direction that keeps the row on screen: lights tile sideways when they are
+/// vertical and downwards when they are horizontal.
+fn beside_neighbours(
+    neighbours: &[Spot],
+    w: f64,
+    h: f64,
+    free_x: f64,
+    free_y: f64,
+    horizontal: bool,
+) -> Option<(f64, f64)> {
+    let anchor = neighbours.iter().min_by_key(|spot| spot.slot)?;
+
+    let step = if horizontal { h + NEXT_GAP } else { w + NEXT_GAP };
+    // Step away from the nearer edge, so a light parked on the right builds its
+    // row leftwards instead of walking off the screen.
+    let towards_start = if horizontal {
+        anchor.y > free_y / 2.0
+    } else {
+        anchor.x > free_x / 2.0
+    };
+
+    // The whole of one direction before trying the other: a row that grows one
+    // way is predictable, whereas filling in on alternate sides puts a new
+    // light behind the ones already there.
+    for forwards in [!towards_start, towards_start] {
+        for n in 1..=MAX_STEPS {
+            let delta = step * n as f64 * if forwards { 1.0 } else { -1.0 };
+            let (x, y) = if horizontal {
+                (anchor.x, anchor.y + delta)
+            } else {
+                (anchor.x + delta, anchor.y)
+            };
+            if x < 0.0 || x > free_x || y < 0.0 || y > free_y {
+                break;
+            }
+            if neighbours.iter().any(|spot| spot.overlaps(x, y, w, h)) {
+                continue;
+            }
+            return Some((x, y));
+        }
+    }
+    None
+}
+
+/// The default corner, with several lights stepped along it so they do not
+/// stack up when there is nothing already placed to measure from.
+#[allow(clippy::too_many_arguments)]
+fn corner_spot(
+    corner: &str,
+    margin: f64,
+    free_x: f64,
+    free_y: f64,
+    w: f64,
+    h: f64,
+    horizontal: bool,
+    slot: usize,
+) -> (f64, f64) {
+    let inset_x = margin.clamp(0.0, free_x);
+    let inset_y = margin.clamp(0.0, free_y);
+
+    let (mut x, mut y) = match corner {
+        "top-left" => (inset_x, inset_y),
+        "bottom-left" => (inset_x, free_y - inset_y),
+        "bottom-right" => (free_x - inset_x, free_y - inset_y),
+        "centre" => (free_x / 2.0, free_y / 2.0),
+        // Anything unrecognised lands top-right, which is the default.
+        _ => (free_x - inset_x, inset_y),
+    };
+
+    if slot > 0 {
+        let shift = slot as f64 * (NEXT_GAP + if horizontal { h } else { w });
+        if horizontal {
+            y = (y + shift).clamp(0.0, free_y);
+        } else {
+            x = if x > free_x / 2.0 { x - shift } else { x + shift };
+            x = x.clamp(0.0, free_x);
+        }
+    }
+
+    (x, y)
 }
 
 /// Write out any position still only held in memory. Moves are written at most
@@ -531,6 +777,91 @@ mod tests {
             unique.dedup();
             assert_eq!(unique.len(), set.len(), "{set:?} collide");
         }
+    }
+
+    // A vertical light at the default size, on a 1920x1032 work area.
+    const W: f64 = 103.0;
+    const H: f64 = 292.0;
+    const FREE_X: f64 = 1920.0 - W;
+    const FREE_Y: f64 = 1032.0 - H;
+
+    fn spot(slot: usize, x: f64, y: f64) -> Spot {
+        Spot { slot, x, y, w: W, h: H }
+    }
+
+    #[test]
+    fn a_new_light_joins_the_row_where_the_user_put_it() {
+        // The user dragged their light to the middle of the screen. The new one
+        // belongs next to it, not off in the default corner.
+        let placed = vec![spot(0, 700.0, 400.0)];
+        let next = beside_neighbours(&placed, W, H, FREE_X, FREE_Y, false).unwrap();
+        assert_eq!(next, (700.0 + W + NEXT_GAP, 400.0));
+    }
+
+    #[test]
+    fn a_third_light_goes_past_the_second_rather_than_on_top_of_it() {
+        let placed = vec![spot(0, 700.0, 400.0), spot(1, 700.0 + W + NEXT_GAP, 400.0)];
+        let next = beside_neighbours(&placed, W, H, FREE_X, FREE_Y, false).unwrap();
+        assert_eq!(next, (700.0 + 2.0 * (W + NEXT_GAP), 400.0));
+        assert!(
+            !placed.iter().any(|s| s.overlaps(next.0, next.1, W, H)),
+            "landed on an existing light"
+        );
+    }
+
+    #[test]
+    fn a_light_parked_on_the_right_builds_its_row_leftwards() {
+        // Stepping right would walk off the screen, so the row grows inwards.
+        let placed = vec![spot(0, FREE_X - 20.0, 40.0)];
+        let next = beside_neighbours(&placed, W, H, FREE_X, FREE_Y, false).unwrap();
+        assert!(next.0 < FREE_X - 20.0, "stepped the wrong way: {next:?}");
+        assert!(next.0 >= 0.0);
+    }
+
+    #[test]
+    fn horizontal_lights_stack_downwards_instead() {
+        // Lamps run left to right, so the next light goes below, not beside.
+        let placed = vec![Spot { slot: 0, x: 300.0, y: 200.0, w: H, h: W }];
+        let next = beside_neighbours(&placed, H, W, FREE_Y, FREE_X, true).unwrap();
+        assert_eq!(next, (300.0, 200.0 + W + NEXT_GAP));
+    }
+
+    #[test]
+    fn with_nothing_placed_yet_there_is_nothing_to_sit_beside() {
+        assert!(beside_neighbours(&[], W, H, FREE_X, FREE_Y, false).is_none());
+    }
+
+    #[test]
+    fn the_row_is_measured_from_the_oldest_light_not_whichever_comes_first() {
+        // Slot order is how long a light has been there; the newest one must
+        // not become the anchor just because it is first in the list.
+        let placed = vec![spot(3, 1200.0, 600.0), spot(0, 200.0, 100.0)];
+        let next = beside_neighbours(&placed, W, H, FREE_X, FREE_Y, false).unwrap();
+        assert_eq!(next.1, 100.0, "measured from the wrong light: {next:?}");
+    }
+
+    #[test]
+    fn the_default_corner_respects_the_margin_and_the_work_area() {
+        let (x, y) = corner_spot("top-right", 40.0, FREE_X, FREE_Y, W, H, false, 0);
+        assert_eq!((x, y), (FREE_X - 40.0, 40.0));
+
+        let (x, y) = corner_spot("bottom-left", 40.0, FREE_X, FREE_Y, W, H, false, 0);
+        assert_eq!((x, y), (40.0, FREE_Y - 40.0));
+    }
+
+    #[test]
+    fn lights_sent_to_the_same_corner_step_along_it() {
+        let first = corner_spot("top-left", 40.0, FREE_X, FREE_Y, W, H, false, 0);
+        let second = corner_spot("top-left", 40.0, FREE_X, FREE_Y, W, H, false, 1);
+        assert_eq!(second.0 - first.0, W + NEXT_GAP);
+        assert_eq!(second.1, first.1);
+    }
+
+    #[test]
+    fn a_margin_larger_than_the_screen_cannot_push_a_light_off_it() {
+        let (x, y) = corner_spot("bottom-right", 5000.0, FREE_X, FREE_Y, W, H, false, 0);
+        assert!((0.0..=FREE_X).contains(&x), "x={x}");
+        assert!((0.0..=FREE_Y).contains(&y), "y={y}");
     }
 
     #[test]

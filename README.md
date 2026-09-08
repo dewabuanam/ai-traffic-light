@@ -64,9 +64,9 @@ how Windows Terminal and VS Code are found.
 ## Install
 
 1. Run the installer from `target/release/bundle/`:
-   - `AI Traffic Lights_1.4.0_x64-setup.exe` — NSIS, per-user, no admin
+   - `AI Traffic Lights_1.5.0_x64-setup.exe` — NSIS, per-user, no admin
      required, installs to `%LOCALAPPDATA%\AI Traffic Lights\`
-   - `AI Traffic Lights_1.4.0_x64_en-US.msi` — MSI, per-machine, needs admin
+   - `AI Traffic Lights_1.5.0_x64_en-US.msi` — MSI, per-machine, needs admin
 2. Register the Claude Code hooks:
 
    ```powershell
@@ -109,11 +109,14 @@ rather paste it in by hand.
   resizes — dragging anywhere else on the light moves it.
 - **Right-click** — settings, always-on-top toggle, rotate, move to default
   position, size presets, reset to green, hide to tray, quit.
-- **Default position** — where a light goes the first time its project is seen,
-  and whenever you ask for it: *Move to default position* on that light's menu,
-  *Move light there now* in the settings (which moves them all), or *Restore
-  defaults*. Several lights sent to the same corner step along from it rather
-  than stacking up.
+- **Where a new light appears** — beside the lights already on screen, one step
+  along the row from whichever has been there longest. Drag your lights into a
+  corner or down the side of the screen and a new session joins them there
+  rather than turning up somewhere else. The **default position** is used when
+  there is nothing to sit beside — the first light of the day — and whenever you
+  ask for it explicitly: *Move to default position* on that light's menu, *Move
+  light there now* in the settings (which moves them all), or *Restore
+  defaults*.
 - **Tray icon** — show, hide, settings or quit. Hovering it shows the current
   status text and the session count.
 - **Auto-hide** — a light exists only while its session does, so with nothing
@@ -159,7 +162,7 @@ preview each and a master volume.
 | Orientation | Vertical or horizontal |
 | Size | Long side of one light, 48–900 px; the short side follows automatically |
 | Caption each light with its project | The folder name under each light's lamps |
-| Default position | Which screen corner a new light goes to, or centre |
+| Default position | Which screen corner a light goes to when there is nothing to sit beside |
 | Margin from the edges | 0–200 px in from the work area, so it clears the taskbar |
 | Default size | The size the light goes back to, kept apart from the live Size |
 | Always on top | Float above other windows |
@@ -264,6 +267,14 @@ instead of the caption ellipsising. The window size is also rounded up rather
 than to nearest, since a window a fraction of a pixel short clips the light,
 while a fraction over is transparent margin on a transparent window.
 
+A light that has never been placed goes next to the ones already on screen —
+one step along from the one that has been there longest, in the direction that
+keeps the row on screen, skipping any spot that is taken. Only lights that have
+actually been placed count as something to measure from: several windows load at
+once at startup, and stepping away from one still sitting at its birth position
+would scatter them. With nothing placed yet it falls back to the default corner,
+where lights are stepped along by age so they do not stack up.
+
 Positions live in `lights.json` beside the preferences, keyed by project and
 written at most once every 800ms — `Moved` arrives for every pixel of a drag.
 The first light of a project is keyed by the project alone, so the usual case of
@@ -287,7 +298,10 @@ flickered between the two sizes for the whole gesture.
 The lights are not a `data-tauri-drag-region` either, for the same kind of
 reason: that hands the press to the OS move loop, which swallows the click a
 light needs in order to focus its terminal. Moving and clicking are told apart
-by how far the pointer travels instead.
+by how far the pointer travels instead — and the light captures the pointer for
+the whole press, because a light is a small window and a quick flick takes the
+pointer outside it before the first move is delivered. Without the capture those
+moves went nowhere and the light simply refused to be dragged.
 
 Visibility is decided in the frontend, from the session count — but *Show light*
 and *Hide to tray* move the window in Rust as well as telling the frontend, so

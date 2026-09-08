@@ -265,9 +265,10 @@ const REQUIRED = {
     "grip.pointerdown",
     // The window is built hidden and shows itself once it is sized.
     "win.show",
-    // Nothing is stored in this run, so it is a first run and the light has to
-    // put itself in its default corner.
-    "invoke:place_light",
+    // This window has never been placed, so it has to take a position —
+    // beside the other lights, which is a different command from the explicit
+    // "go to the default corner".
+    "invoke:place_new_light",
   ],
 };
 
@@ -395,7 +396,7 @@ if (!failed) {
   try {
     await import(`${pathToFileURL(path.join(SRC, "main.js")).href}?t=${Date.now()}-again`);
     await settle();
-    if (registered.includes("invoke:place_light")) {
+    if (registered.some((name) => name.startsWith("invoke:place_"))) {
       console.log("moved the light even though a position was already stored");
       failed = true;
     } else {

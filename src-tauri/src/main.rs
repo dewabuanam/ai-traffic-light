@@ -100,13 +100,9 @@ fn quit_app(app: tauri::AppHandle) {
     app.exit(0);
 }
 
-/// Put the light on a corner of the screen it is currently on.
-///
-/// Done here rather than in the frontend because this needs the monitor's *work
-/// area* — the screen minus the taskbar — which the webview cannot see. A light
-/// placed in the bottom-right from JS would sit behind the taskbar.
-///
-/// `margin` is in logical pixels, like every other size in the preferences.
+/// Put a light on a corner of the screen it is currently on. This is the
+/// explicit request — "Move to default position" — so it always means the
+/// corner, never wherever the other lights happen to be.
 #[tauri::command]
 fn place_light(
     app: tauri::AppHandle,
@@ -114,71 +110,21 @@ fn place_light(
     corner: String,
     margin: f64,
 ) -> Result<(), String> {
-    let label = window.label().to_string();
-    let window = app
-        .get_webview_window(&label)
-        .ok_or_else(|| format!("no window {label}"))?;
+    lights::place(&app, window.label(), &corner, margin, false)
+}
 
-    // `current_monitor` is the one the light is on now; on a fresh install the
-    // window has not been shown yet, so fall back to the primary.
-    let monitor = window
-        .current_monitor()
-        .map_err(|e| e.to_string())?
-        .or(window.primary_monitor().map_err(|e| e.to_string())?)
-        .ok_or_else(|| "no monitor".to_string())?;
-
-    let scale = monitor.scale_factor();
-    let area = monitor.work_area();
-    let screen = area.size.to_logical::<f64>(scale);
-    let origin = area.position.to_logical::<f64>(scale);
-    let size = window
-        .outer_size()
-        .map_err(|e| e.to_string())?
-        .to_logical::<f64>(scale);
-
-    // Never let the margin push the light off a screen too small for it.
-    let free_x = (screen.width - size.width).max(0.0);
-    let free_y = (screen.height - size.height).max(0.0);
-    let inset_x = margin.clamp(0.0, free_x);
-    let inset_y = margin.clamp(0.0, free_y);
-
-    let (mut x, mut y) = match corner.as_str() {
-        "top-left" => (inset_x, inset_y),
-        "bottom-left" => (inset_x, free_y - inset_y),
-        "bottom-right" => (free_x - inset_x, free_y - inset_y),
-        "centre" => (free_x / 2.0, free_y / 2.0),
-        // Anything unrecognised lands top-right, which is the default.
-        _ => (free_x - inset_x, inset_y),
-    };
-
-    // Several lights sent to the same corner would sit exactly on top of each
-    // other, so each is stepped along by its slot. Vertical lights step
-    // sideways and horizontal ones downwards, which is the direction that keeps
-    // them in a tidy row.
-    let slot = app.state::<lights::Lights>().slot_of(&label) as f64;
-    if slot > 0.0 {
-        let horizontal = {
-            let prefs = app.state::<Prefs>();
-            let value = match prefs.value.lock() {
-                Ok(value) => value.clone(),
-                Err(poisoned) => poisoned.into_inner().clone(),
-            };
-            value.get("orientation").and_then(Value::as_str) == Some("horizontal")
-        };
-        let step = slot * 12.0;
-        if horizontal {
-            y += step + slot * size.height;
-            y = y.clamp(0.0, free_y);
-        } else {
-            let shift = step + slot * size.width;
-            x = if x > free_x / 2.0 { x - shift } else { x + shift };
-            x = x.clamp(0.0, free_x);
-        }
-    }
-
-    window
-        .set_position(tauri::LogicalPosition::new(origin.x + x, origin.y + y))
-        .map_err(|e| e.to_string())
+/// Place a light that has never been placed before: beside the lights already
+/// on screen, so a new session joins the row the user has arranged rather than
+/// appearing in a corner far away from it. Falls back to the corner when there
+/// is nothing to sit beside.
+#[tauri::command]
+fn place_new_light(
+    app: tauri::AppHandle,
+    window: tauri::Window,
+    corner: String,
+    margin: f64,
+) -> Result<(), String> {
+    lights::place(&app, window.label(), &corner, margin, true)
 }
 
 /// Ask the light to go to its default position and size.
@@ -384,6 +330,7 @@ fn main() {
             set_prefs,
             focus_session,
             place_light,
+            place_new_light,
             send_light_home,
             lights_hidden
         ])

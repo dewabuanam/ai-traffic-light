@@ -195,18 +195,24 @@ async function setAlong(along) {
   await resizeFromPrefs();
 }
 
-// Send this light home: the default size, then the default corner. Size first,
-// because where a bottom or right corner puts the window depends on how big it
-// is. The corner itself is worked out in Rust, which can see the screen's work
-// area — the part the taskbar does not cover.
-async function goHome() {
+// Put this light where it belongs: the default size, then a position. Size
+// first, because where a bottom or right corner puts the window depends on how
+// big it is. The position itself is worked out in Rust, which can see both the
+// screen's work area — the part the taskbar does not cover — and where the
+// other lights are.
+//
+// `place_new_light` is for a light that has never been placed: it joins the
+// lights already on screen rather than going to the corner, so a new session
+// turns up next to the row rather than somewhere else entirely. `place_light`
+// is the explicit "go to the default position", which always means the corner.
+async function place(command) {
   prefs.along = clamp(Math.round(prefs.defaultAlong), MIN_ALONG, MAX_ALONG);
   saveNow();
   await resizeFromPrefs();
   try {
-    await invoke("place_light", { corner: prefs.defaultCorner, margin: prefs.defaultMargin });
+    await invoke(command, { corner: prefs.defaultCorner, margin: prefs.defaultMargin });
   } catch (err) {
-    console.error("place_light failed", err);
+    console.error(`${command} failed`, err);
   }
 }
 
@@ -221,28 +227,44 @@ window.addEventListener("resize", layout);
 const DRAG_SLOP = 4;
 let press = null;
 
+// The pointer is captured for the duration of the press. A light is a small
+// window, and a quick flick takes the pointer outside it before the first
+// `pointermove` lands — without capture those moves go nowhere and the drag
+// never starts, so the light simply refuses to move.
+function releasePress() {
+  if (!press) return;
+  try {
+    light.releasePointerCapture(press.id);
+  } catch {
+    /* capture is already gone */
+  }
+  press = null;
+}
+
 light.addEventListener("pointerdown", (event) => {
   if (event.button !== 0) return;
-  press = { x: event.clientX, y: event.clientY };
+  light.setPointerCapture(event.pointerId);
+  press = { id: event.pointerId, x: event.clientX, y: event.clientY };
 });
 
 light.addEventListener("pointermove", (event) => {
-  if (!press) return;
+  if (!press || event.pointerId !== press.id) return;
   if (
     Math.abs(event.clientX - press.x) < DRAG_SLOP &&
     Math.abs(event.clientY - press.y) < DRAG_SLOP
   ) {
     return;
   }
-  // The OS owns the pointer from here, so there is no pointerup coming.
-  press = null;
+  // The OS takes the pointer from here — so hand it over, and expect no
+  // pointerup of our own.
+  releasePress();
   appWindow.startDragging().catch((err) => console.error("startDragging failed", err));
 });
 
-light.addEventListener("pointerup", () => {
-  const clicked = press;
-  press = null;
-  if (!clicked || !SESSION || !prefs.clickFocus) return;
+light.addEventListener("pointerup", (event) => {
+  if (!press || event.pointerId !== press.id) return;
+  releasePress();
+  if (!SESSION || !prefs.clickFocus) return;
 
   // Best effort: the terminal may have been closed, or be one this cannot
   // find. Nothing useful to say to the user about it from a click.
@@ -251,9 +273,7 @@ light.addEventListener("pointerup", () => {
   );
 });
 
-light.addEventListener("pointercancel", () => {
-  press = null;
-});
+light.addEventListener("pointercancel", releasePress);
 
 /* ---------------- resizing ---------------- */
 
@@ -356,7 +376,7 @@ listen("menu-action", async (event) => {
       await setAlong(SIZES[event.payload]);
       break;
     case "home":
-      await goHome();
+      await place("place_light");
       break;
   }
 });
@@ -394,9 +414,9 @@ onPrefsChanged((next) => {
 applyAll()
   .then(refresh)
   .then(async () => {
-    // A window with no remembered position has never been placed, so put it in
-    // its default corner. `lights.rs` is what knows which those are.
-    if (FRESH) await goHome();
+    // A window with no remembered position has never been placed, so it takes
+    // one now — beside the lights already on screen if there are any.
+    if (FRESH) await place("place_new_light");
     if (!START_HIDDEN) await appWindow.show();
   })
   .then(() => appWindow.onResized(({ payload }) => onResized(payload)));

@@ -368,6 +368,16 @@ fn main() {
             // The lights the app starts with, before any session changes.
             lights::sync(app.handle());
 
+            // Where the lights are is collected in memory as they move and
+            // written on a beat: `Moved` arrives for every pixel of a drag, and
+            // several lights placing themselves at startup do it within a few
+            // milliseconds of each other.
+            let places = app.handle().clone();
+            std::thread::spawn(move || loop {
+                std::thread::sleep(lights::FLUSH_EVERY);
+                lights::flush(&places);
+            });
+
             // Poll the session files: open and close light windows to match,
             // and push the change to the windows and the tray tooltip.
             std::thread::spawn(move || {

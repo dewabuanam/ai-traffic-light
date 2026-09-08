@@ -17,7 +17,7 @@ use std::fs;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use serde_json::Value;
 use tauri::{
@@ -42,9 +42,9 @@ const IDLE_KEY: &str = "idle";
 /// the window does not flash at some absurd size first.
 const BIRTH_SIZE: (f64, f64) = (103.0, 292.0);
 
-/// A moved window is written down at most this often. `Moved` arrives for every
-/// pixel of a drag, and this is a file write.
-const SAVE_EVERY: Duration = Duration::from_millis(800);
+/// How often positions are written out. `Moved` arrives for every pixel of a
+/// drag, so they are collected in memory and flushed on this beat instead.
+pub const FLUSH_EVERY: Duration = Duration::from_millis(500);
 
 /// The space left between two lights placed next to each other.
 const NEXT_GAP: f64 = 12.0;
@@ -105,7 +105,12 @@ pub struct Lights {
 struct Places {
     path: PathBuf,
     value: Mutex<HashMap<String, (f64, f64)>>,
-    last_write: Mutex<Instant>,
+    /// Set when a position has changed and not yet been written. Throttling by
+    /// the clock instead — writing only if the last write was long enough ago —
+    /// *dropped* the positions in between: when three lights place themselves
+    /// at startup they do it within a few milliseconds of each other, so only
+    /// the first was ever saved and the rest were re-derived on the next run.
+    dirty: AtomicBool,
 }
 
 impl Places {
@@ -118,8 +123,7 @@ impl Places {
         Places {
             path,
             value: Mutex::new(value),
-            // Far enough in the past that the first move is written straight away.
-            last_write: Mutex::new(Instant::now() - SAVE_EVERY),
+            dirty: AtomicBool::new(false),
         }
     }
 
@@ -128,41 +132,38 @@ impl Places {
     }
 
     fn set(&self, key: &str, pos: (f64, f64)) {
-        let snapshot = {
-            let Ok(mut value) = self.value.lock() else {
-                return;
-            };
-            value.insert(key.to_string(), pos);
+        let Ok(mut value) = self.value.lock() else {
+            return;
+        };
+        if value.insert(key.to_string(), pos) != Some(pos) {
+            self.dirty.store(true, Ordering::Relaxed);
+        }
+    }
 
-            let Ok(mut last) = self.last_write.lock() else {
+    /// Write out anything that has changed. Called on a beat while the app
+    /// runs, when a window goes away, and once more on the way out.
+    fn flush(&self) {
+        if !self.dirty.swap(false, Ordering::Relaxed) {
+            return;
+        }
+        let snapshot = {
+            let Ok(value) = self.value.lock() else {
                 return;
             };
-            if last.elapsed() < SAVE_EVERY {
-                return;
-            }
-            *last = Instant::now();
             value.clone()
         };
 
         if let Some(dir) = self.path.parent() {
             let _ = fs::create_dir_all(dir);
         }
-        if let Ok(bytes) = serde_json::to_vec_pretty(&snapshot) {
-            let _ = fs::write(&self.path, bytes);
-        }
-    }
-
-    /// Called when a window goes away, so the last drag is not lost to the
-    /// write throttle.
-    fn flush(&self) {
-        let Ok(value) = self.value.lock() else {
-            return;
-        };
-        if let Some(dir) = self.path.parent() {
-            let _ = fs::create_dir_all(dir);
-        }
-        if let Ok(bytes) = serde_json::to_vec_pretty(&*value) {
-            let _ = fs::write(&self.path, bytes);
+        match serde_json::to_vec_pretty(&snapshot) {
+            Ok(bytes) => {
+                if fs::write(&self.path, bytes).is_err() {
+                    // Try again on the next beat rather than losing it.
+                    self.dirty.store(true, Ordering::Relaxed);
+                }
+            }
+            Err(_) => self.dirty.store(true, Ordering::Relaxed),
         }
     }
 }

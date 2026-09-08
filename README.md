@@ -64,9 +64,9 @@ how Windows Terminal and VS Code are found.
 ## Install
 
 1. Run the installer from `target/release/bundle/`:
-   - `AI Traffic Lights_1.5.0_x64-setup.exe` — NSIS, per-user, no admin
+   - `AI Traffic Lights_1.5.1_x64-setup.exe` — NSIS, per-user, no admin
      required, installs to `%LOCALAPPDATA%\AI Traffic Lights\`
-   - `AI Traffic Lights_1.5.0_x64_en-US.msi` — MSI, per-machine, needs admin
+   - `AI Traffic Lights_1.5.1_x64_en-US.msi` — MSI, per-machine, needs admin
 2. Register the Claude Code hooks:
 
    ```powershell
@@ -275,8 +275,12 @@ once at startup, and stepping away from one still sitting at its birth position
 would scatter them. With nothing placed yet it falls back to the default corner,
 where lights are stepped along by age so they do not stack up.
 
-Positions live in `lights.json` beside the preferences, keyed by project and
-written at most once every 800ms — `Moved` arrives for every pixel of a drag.
+Positions live in `lights.json` beside the preferences, keyed by project.
+`Moved` arrives for every pixel of a drag, so they are collected in memory and
+written on a half-second beat. Throttling by the clock instead — writing only if
+the last write was long enough ago — *dropped* everything in between: three
+lights place themselves within a few milliseconds of each other at startup, so
+only the first was ever saved and the rest were re-derived on the next run.
 The first light of a project is keyed by the project alone, so the usual case of
 one session per project keeps a stable name however many *other* sessions happen
 to be running; only a project's second and later windows are numbered. Keying on

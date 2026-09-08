@@ -19,7 +19,7 @@ dependencies = [
 
 [[package]]
 name = "ai-traffic-lights"
-version = "1.5.0"
+version = "1.5.1"
 dependencies = [
  "ai-traffic-lights-core",
  "serde",
@@ -31,7 +31,7 @@ dependencies = [
 
 [[package]]
 name = "ai-traffic-lights-core"
-version = "1.5.0"
+version = "1.5.1"
 dependencies = [
  "serde",
  "serde_json",
@@ -349,7 +349,7 @@ dependencies = [
 
 [[package]]
 name = "claude-light-hook"
-version = "1.5.0"
+version = "1.5.1"
 dependencies = [
  "ai-traffic-lights-core",
  "serde_json",

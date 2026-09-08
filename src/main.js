@@ -77,84 +77,151 @@ function layout() {
 
 /* ---------------- window size ---------------- */
 
-// The window's short axis is derived from its long axis, so the housing always
-// fills the frame exactly and no background peeks out beside the lamps.
-let applying = false;
+// The short axis is derived from the long one, so the housing always fits the
+// lamps exactly and no background shows beside them.
+//
+// Dragging the window edge is a native resize: wry hit-tests the border of a
+// borderless resizable window itself, so the webview never sees that press and
+// the OS moves only the edge being pulled. The correction therefore has to go
+// out on every resize event rather than once the drag settles — debouncing it
+// left the window off-ratio for the whole gesture and then snapped, which is
+// the jump you could see.
+let drag = null;
+
+// The last size we asked for, so our own change echoing back is not mistaken
+// for the user resizing again.
+let requested = null;
 
 async function resizeFromPrefs() {
   const { w, h } = sizeFor(prefs.along, prefs.orientation);
-  if (Math.abs(w - window.innerWidth) > 1 || Math.abs(h - window.innerHeight) > 1) {
-    applying = true;
-    try {
-      await appWindow.setSize(new LogicalSize(w, h));
-    } finally {
-      // Let our own resize event land before we start believing them again.
-      setTimeout(() => (applying = false), 150);
-    }
-  }
+  layout();
+  if (Math.abs(w - window.innerWidth) <= 1 && Math.abs(h - window.innerHeight) <= 1) return;
+  requested = { w, h };
+  await appWindow.setSize(new LogicalSize(w, h));
   layout();
 }
 
-// The user dragged the grip: adopt the new long axis and snap the short one back.
-//
-// The size comes from Tauri rather than `window.innerWidth/innerHeight`, which
-// read zero before the webview has painted. Sizes we asked for ourselves, and
-// sizes below the minimum, are ignored — persisting either one used to shrink
-// the light permanently.
-let snapTimer = null;
+// One resize per frame, so a fast drag cannot outrun the compositor.
+let framePending = false;
 
-function scheduleSnap(physical) {
-  clearTimeout(snapTimer);
-  snapTimer = setTimeout(() => absorbResize(physical), 120);
+function resizeSoon() {
+  if (framePending) return;
+  framePending = true;
+  requestAnimationFrame(() => {
+    framePending = false;
+    resizeFromPrefs();
+  });
 }
 
-async function absorbResize(physical) {
-  if (applying) return;
+// A file write per frame of a drag would be wasteful; once it settles is enough.
+let saveTimer = null;
+
+function saveSoon() {
+  clearTimeout(saveTimer);
+  saveTimer = setTimeout(() => savePrefs(prefs), 250);
+}
+
+function saveNow() {
+  clearTimeout(saveTimer);
+  savePrefs(prefs);
+}
+
+function onResized(physical) {
+  // Our own pointer drag already keeps both axes in step.
+  if (drag) return;
 
   const scale = window.devicePixelRatio || 1;
-  const vertical = prefs.orientation !== "horizontal";
-  const along = Math.round((vertical ? physical.height : physical.width) / scale);
+  const w = Math.round(physical.width / scale);
+  const h = Math.round(physical.height / scale);
+
+  if (requested && Math.abs(requested.w - w) <= 1 && Math.abs(requested.h - h) <= 1) {
+    layout();
+    return;
+  }
+
+  const along = prefs.orientation === "horizontal" ? w : h;
 
   // Anything under the minimum is a window that is hiding, minimising or being
-  // torn down rather than a drag. Restore the size, and never write it down.
+  // torn down rather than a resize. Restore the size, and never write it down.
   if (!(along >= MIN_ALONG)) {
-    await resizeFromPrefs();
+    resizeFromPrefs();
     return;
   }
 
   const next = Math.min(along, MAX_ALONG);
   if (next !== prefs.along) {
     prefs.along = next;
-    savePrefs(prefs);
+    saveSoon();
   }
-  await resizeFromPrefs();
+  resizeFromPrefs();
 }
 
 async function setAlong(along) {
   prefs.along = clamp(Math.round(along), MIN_ALONG, MAX_ALONG);
-  savePrefs(prefs);
+  saveNow();
   await resizeFromPrefs();
 }
 
 window.addEventListener("resize", layout);
 
-/* ---------------- window controls ---------------- */
+/* ---------------- resizing ---------------- */
 
-grip.addEventListener("mousedown", (event) => {
+// The drag is driven here rather than handed to `startResizeDragging`, because
+// the OS drag moves only the edge being pulled. With the short side locked to
+// the long one, that left the window off-ratio for the whole gesture — a dark
+// band opening up beside the lamps — and any correction sent mid-drag fought
+// the OS drag loop and made the window jump. Doing it ourselves keeps both
+// axes in step on every frame.
+grip.addEventListener("pointerdown", (event) => {
   if (event.button !== 0) return;
   event.preventDefault();
-  // Only the long axis is draggable — the short axis is locked to the ratio.
-  appWindow.startResizeDragging(prefs.orientation === "horizontal" ? "East" : "South");
+  grip.setPointerCapture(event.pointerId);
+  const horizontal = prefs.orientation === "horizontal";
+  drag = {
+    id: event.pointerId,
+    horizontal,
+    // Distance from the pointer to the edge, so the edge keeps its grip on the
+    // pointer rather than jumping to sit under it.
+    offset: horizontal
+      ? window.innerWidth - event.clientX
+      : window.innerHeight - event.clientY,
+  };
 });
+
+grip.addEventListener("pointermove", (event) => {
+  if (!drag || event.pointerId !== drag.id) return;
+  // The window's top-left stays put, so the pointer's client coordinate is the
+  // distance from that corner — which is the new length once the grab offset
+  // is added back.
+  const edge = (drag.horizontal ? event.clientX : event.clientY) + drag.offset;
+  prefs.along = clamp(Math.round(edge), MIN_ALONG, MAX_ALONG);
+  resizeSoon();
+});
+
+function endDrag(event) {
+  if (!drag || event.pointerId !== drag.id) return;
+  try {
+    grip.releasePointerCapture(drag.id);
+  } catch {
+    /* capture is already gone */
+  }
+  drag = null;
+  saveNow();
+}
+
+grip.addEventListener("pointerup", endDrag);
+grip.addEventListener("pointercancel", endDrag);
 
 // Ctrl + wheel scales the window around its current top-left corner.
 window.addEventListener(
   "wheel",
-  async (event) => {
+  (event) => {
     if (!event.ctrlKey) return;
     event.preventDefault();
     const factor = event.deltaY < 0 ? 1.1 : 1 / 1.1;
-    await setAlong(prefs.along * factor);
+    prefs.along = clamp(Math.round(prefs.along * factor), MIN_ALONG, MAX_ALONG);
+    resizeSoon();
+    saveSoon();
   },
   { passive: false }
 );
@@ -202,8 +269,6 @@ async function applyAlwaysOnTop() {
 }
 
 async function applyAll() {
-  // A snap queued against the old geometry would write back a stale size.
-  clearTimeout(snapTimer);
   applyAppearance();
   await applyAlwaysOnTop();
   await resizeFromPrefs();
@@ -216,4 +281,4 @@ onPrefsChanged((next) => {
 
 // Only start tracking resizes once the window is at the size we asked for, so a
 // startup transient can never be mistaken for the user dragging the grip.
-applyAll().then(() => appWindow.onResized(({ payload }) => scheduleSnap(payload)));
+applyAll().then(() => appWindow.onResized(({ payload }) => onResized(payload)));

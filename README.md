@@ -40,9 +40,9 @@ yellow, otherwise green. Sessions with no update for 12 hours are pruned.
 ## Install
 
 1. Run the installer from `target/release/bundle/`:
-   - `AI Traffic Lights_1.1.0_x64-setup.exe` — NSIS, per-user, no admin
+   - `AI Traffic Lights_1.1.1_x64-setup.exe` — NSIS, per-user, no admin
      required, installs to `%LOCALAPPDATA%\AI Traffic Lights\`
-   - `AI Traffic Lights_1.1.0_x64_en-US.msi` — MSI, per-machine, needs admin
+   - `AI Traffic Lights_1.1.1_x64_en-US.msi` — MSI, per-machine, needs admin
 2. Register the Claude Code hooks:
 
    ```powershell
@@ -75,8 +75,9 @@ rather paste it in by hand.
 - **Move** — drag the housing anywhere.
 - **Resize** — drag the trailing edge (the bottom when vertical, the right when
   horizontal), or hold <kbd>Ctrl</kbd> and scroll. Only the long side is
-  draggable: the short side is locked to the traffic-light proportion so the
-  casing always fits the lamps exactly, with no background showing beside them.
+  draggable: the short side follows it, staying on the traffic-light proportion
+  throughout the drag, so the casing always fits the lamps exactly with no
+  background showing beside them.
 - **Right-click** — settings, always-on-top toggle, rotate, size presets, reset
   to green, hide to tray, quit.
 - **Tray icon** — show, hide, settings or quit. Hovering it shows the current
@@ -132,11 +133,18 @@ on Windows 11).
 ```powershell
 npm install
 npm run dev      # hot-reloading dev window
+npm run check    # load the frontend modules against a stub DOM
 npm run build    # release build + NSIS and MSI bundles
 ```
 
 The frontend is plain HTML/CSS/JS in `src/` — there is no bundler, so edits show
 up on reload.
+
+`npm run check` exists because a throw at module scope is invisible in the app:
+the window still paints and the lamps still light from an already-issued
+`get_status`, and only the code after the throw quietly goes missing. The check
+loads each module against a stub DOM and stub `window.__TAURI__` and fails if
+one throws or never reaches the handlers it must register.
 
 ### Layout
 
@@ -163,6 +171,12 @@ settings apply live.
 
 The light's right-click menu is a native menu built in Rust. The window is
 smaller than any useful menu, so an HTML one would be clipped by the webview.
+
+Dragging the window edge is a native resize — wry hit-tests the border of a
+borderless resizable window itself, so the webview never sees that press and the
+OS moves only the edge being pulled. The short side is therefore corrected on
+every resize event rather than once the drag settles; correcting it late left
+the window off-ratio for the whole gesture and then snapped.
 
 ## Troubleshooting
 

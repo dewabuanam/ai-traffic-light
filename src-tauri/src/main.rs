@@ -11,26 +11,25 @@ use tauri::menu::{CheckMenuItem, ContextMenu, Menu, MenuItem, PredefinedMenuItem
 use tauri::tray::TrayIconBuilder;
 use tauri::{Emitter, Manager, WebviewUrl, WebviewWindowBuilder, Wry};
 
-use tauri_plugin_window_state::StateFlags;
-
 use ai_traffic_lights_core::{clear_status, read_sessions, snapshot, Snapshot, Status};
 
 mod focus;
+mod lights;
 
 const POLL_INTERVAL: Duration = Duration::from_millis(200);
 
 /// Wry's own default args plus the autoplay opt-out, so the status sounds can
 /// play without the user first having clicked inside the window. Wry drops its
 /// defaults as soon as this is set, hence repeating them here.
-const BROWSER_ARGS: &str =
+pub const BROWSER_ARGS: &str =
     "--disable-features=msWebOOUI,msPdfOOUI,msSmartScreenProtection --autoplay-policy=no-user-gesture-required";
 
 /// Preferences live here rather than in each webview's `localStorage`, so the
 /// light and the settings window cannot hold diverging copies and clobber each
 /// other's changes. Both read from here and both are told when it changes.
-struct Prefs {
+pub struct Prefs {
     path: PathBuf,
-    value: Mutex<Value>,
+    pub value: Mutex<Value>,
 }
 
 impl Prefs {
@@ -109,10 +108,16 @@ fn quit_app(app: tauri::AppHandle) {
 ///
 /// `margin` is in logical pixels, like every other size in the preferences.
 #[tauri::command]
-fn place_light(app: tauri::AppHandle, corner: String, margin: f64) -> Result<(), String> {
+fn place_light(
+    app: tauri::AppHandle,
+    window: tauri::Window,
+    corner: String,
+    margin: f64,
+) -> Result<(), String> {
+    let label = window.label().to_string();
     let window = app
-        .get_webview_window("main")
-        .ok_or_else(|| "no light window".to_string())?;
+        .get_webview_window(&label)
+        .ok_or_else(|| format!("no window {label}"))?;
 
     // `current_monitor` is the one the light is on now; on a fresh install the
     // window has not been shown yet, so fall back to the primary.
@@ -137,7 +142,7 @@ fn place_light(app: tauri::AppHandle, corner: String, margin: f64) -> Result<(),
     let inset_x = margin.clamp(0.0, free_x);
     let inset_y = margin.clamp(0.0, free_y);
 
-    let (x, y) = match corner.as_str() {
+    let (mut x, mut y) = match corner.as_str() {
         "top-left" => (inset_x, inset_y),
         "bottom-left" => (inset_x, free_y - inset_y),
         "bottom-right" => (free_x - inset_x, free_y - inset_y),
@@ -145,6 +150,31 @@ fn place_light(app: tauri::AppHandle, corner: String, margin: f64) -> Result<(),
         // Anything unrecognised lands top-right, which is the default.
         _ => (free_x - inset_x, inset_y),
     };
+
+    // Several lights sent to the same corner would sit exactly on top of each
+    // other, so each is stepped along by its slot. Vertical lights step
+    // sideways and horizontal ones downwards, which is the direction that keeps
+    // them in a tidy row.
+    let slot = app.state::<lights::Lights>().slot_of(&label) as f64;
+    if slot > 0.0 {
+        let horizontal = {
+            let prefs = app.state::<Prefs>();
+            let value = match prefs.value.lock() {
+                Ok(value) => value.clone(),
+                Err(poisoned) => poisoned.into_inner().clone(),
+            };
+            value.get("orientation").and_then(Value::as_str) == Some("horizontal")
+        };
+        let step = slot * 12.0;
+        if horizontal {
+            y += step + slot * size.height;
+            y = y.clamp(0.0, free_y);
+        } else {
+            let shift = step + slot * size.width;
+            x = if x > free_x / 2.0 { x - shift } else { x + shift };
+            x = x.clamp(0.0, free_x);
+        }
+    }
 
     window
         .set_position(tauri::LogicalPosition::new(origin.x + x, origin.y + y))
@@ -158,8 +188,17 @@ fn place_light(app: tauri::AppHandle, corner: String, margin: f64) -> Result<(),
 /// light is what owns its size.
 #[tauri::command]
 fn send_light_home(app: tauri::AppHandle) -> Result<(), String> {
-    app.emit_to("main", "menu-action", "home")
-        .map_err(|e| e.to_string())
+    for window in lights::windows(&app) {
+        let _ = app.emit_to(window.label(), "menu-action", "home");
+    }
+    Ok(())
+}
+
+/// Whether the user has hidden the lights. A window asks on startup so that a
+/// session starting while they are hidden does not show itself.
+#[tauri::command]
+fn lights_hidden(app: tauri::AppHandle) -> bool {
+    lights::hidden(&app)
 }
 
 /// Bring the terminal running a given session to the front. Clicking a light
@@ -188,7 +227,8 @@ fn open_settings(app: tauri::AppHandle) -> Result<(), String> {
 
     WebviewWindowBuilder::new(&app, "settings", WebviewUrl::App("settings.html".into()))
         .title("AI Traffic Lights — Settings")
-        .inner_size(430.0, 620.0)
+        // Tall enough to show Appearance and Placement without scrolling.
+        .inner_size(430.0, 760.0)
         .min_inner_size(380.0, 380.0)
         .resizable(true)
         .skip_taskbar(false)
@@ -205,6 +245,10 @@ fn open_settings(app: tauri::AppHandle) -> Result<(), String> {
 struct LightMenu {
     menu: Menu<Wry>,
     on_top: CheckMenuItem<Wry>,
+    /// The light the menu was last opened on. A menu event does not say which
+    /// window it came from, and "Move to default position" has to move that one
+    /// light rather than all of them.
+    opened_on: Mutex<Option<String>>,
 }
 
 fn build_light_menu(app: &tauri::App) -> tauri::Result<LightMenu> {
@@ -228,7 +272,11 @@ fn build_light_menu(app: &tauri::App) -> tauri::Result<LightMenu> {
             &MenuItem::with_id(app, "ctx-quit", "Quit", true, None::<&str>)?,
         ],
     )?;
-    Ok(LightMenu { menu, on_top })
+    Ok(LightMenu {
+        menu,
+        on_top,
+        opened_on: Mutex::new(None),
+    })
 }
 
 /// The frontend owns the preferences, so it tells us how to draw the checkmark
@@ -244,27 +292,10 @@ fn show_context_menu(
         .on_top
         .set_checked(always_on_top)
         .map_err(|e| e.to_string())?;
-    state.menu.popup(window).map_err(|e| e.to_string())
-}
-
-/// Show or hide the light on the user's say-so.
-///
-/// The window is done here rather than in the frontend so that "Show light"
-/// still works if the webview is wedged — it is the only way back from a hidden
-/// window. The frontend is told as well, because it is what decides visibility
-/// from the session count and would otherwise undo this on the next status
-/// change.
-fn set_visible(app: &tauri::AppHandle, visible: bool) {
-    if let Some(window) = app.get_webview_window("main") {
-        if visible {
-            let _ = window.unminimize();
-            let _ = window.show();
-            let _ = window.set_focus();
-        } else {
-            let _ = window.hide();
-        }
+    if let Ok(mut opened_on) = state.opened_on.lock() {
+        *opened_on = Some(window.label().to_string());
     }
-    let _ = app.emit_to("main", "visibility-forced", visible);
+    state.menu.popup(window).map_err(|e| e.to_string())
 }
 
 fn on_light_menu(app: &tauri::AppHandle, id: &str) {
@@ -273,11 +304,28 @@ fn on_light_menu(app: &tauri::AppHandle, id: &str) {
             let _ = open_settings(app.clone());
         }
         "ctx-reset" => reset_status(),
-        "ctx-hide" => set_visible(app, false),
+        // Hiding is all-or-nothing: there is no way to bring one particular
+        // light back from the tray, so "Hide to tray" takes them all.
+        "ctx-hide" => lights::set_visible(app, false),
         "ctx-quit" => app.exit(0),
-        // Everything else changes a preference, which lives in the frontend.
+        // "Move to default position" is about the one light that was clicked;
+        // everything else changes a preference, which every light shares.
+        "ctx-home" => {
+            let opened_on = app
+                .state::<LightMenu>()
+                .opened_on
+                .lock()
+                .ok()
+                .and_then(|label| label.clone());
+            if let Some(label) = opened_on {
+                let _ = app.emit_to(label, "menu-action", "home");
+            }
+        }
         other => {
-            let _ = app.emit_to("main", "menu-action", other.trim_start_matches("ctx-"));
+            let action = other.trim_start_matches("ctx-");
+            for window in lights::windows(app) {
+                let _ = app.emit_to(window.label(), "menu-action", action);
+            }
         }
     }
 }
@@ -321,18 +369,11 @@ fn ui_key(snap: &Snapshot) -> UiKey {
 }
 
 fn main() {
-    tauri::Builder::default()
-        // Remember where the user parked the light. Size is deliberately left
-        // out: it is a preference now, because the short side is derived from
-        // the long one and a restored free-form size would break the ratio.
-        // Visibility is left out too, so quitting while hidden in the tray does
-        // not bring the app back invisible.
-        .plugin(
-            tauri_plugin_window_state::Builder::default()
-                .with_state_flags(StateFlags::POSITION)
-                .with_denylist(&["settings"])
-                .build(),
-        )
+    // Positions are remembered by `lights.rs`, against the *project* rather
+    // than the window, because a light window only lives as long as its session
+    // and session ids are new every time. That is also why the window-state
+    // plugin is gone: it keys on the window label, which here is disposable.
+    let app = tauri::Builder::default()
         .invoke_handler(tauri::generate_handler![
             get_status,
             reset_status,
@@ -343,13 +384,15 @@ fn main() {
             set_prefs,
             focus_session,
             place_light,
-            send_light_home
+            send_light_home,
+            lights_hidden
         ])
         .on_menu_event(|app, event| on_light_menu(app, event.id().as_ref()))
         .setup(|app| {
             let handle = app.handle().clone();
 
             app.manage(Prefs::load(app));
+            app.manage(lights::Lights::load(app));
             app.manage(build_light_menu(app)?);
 
             let show = MenuItem::with_id(app, "show", "Show light", true, None::<&str>)?;
@@ -365,8 +408,8 @@ fn main() {
                 .menu(&menu)
                 .show_menu_on_left_click(false)
                 .on_menu_event(|app, event| match event.id().as_ref() {
-                    "show" => set_visible(app, true),
-                    "hide" => set_visible(app, false),
+                    "show" => lights::set_visible(app, true),
+                    "hide" => lights::set_visible(app, false),
                     "settings" => {
                         let _ = open_settings(app.clone());
                     }
@@ -375,7 +418,11 @@ fn main() {
                 })
                 .build(app)?;
 
-            // Poll the session files and push changes to the UI + tray tooltip.
+            // The lights the app starts with, before any session changes.
+            lights::sync(app.handle());
+
+            // Poll the session files: open and close light windows to match,
+            // and push the change to the windows and the tray tooltip.
             std::thread::spawn(move || {
                 let mut last: Option<UiKey> = None;
                 loop {
@@ -384,6 +431,12 @@ fn main() {
                     if last.as_ref() != Some(&key) {
                         let _ = tray.set_tooltip(Some(tooltip(&snap)));
                         let _ = handle.emit("status-changed", &snap);
+                        // Windows must be created on the main thread; off it,
+                        // building one deadlocks the event loop.
+                        let _ = handle.run_on_main_thread({
+                            let handle = handle.clone();
+                            move || lights::sync(&handle)
+                        });
                         last = Some(key);
                     }
                     std::thread::sleep(POLL_INTERVAL);
@@ -392,6 +445,21 @@ fn main() {
 
             Ok(())
         })
-        .run(tauri::generate_context!())
-        .expect("error while running AI Traffic Lights");
+        .build(tauri::generate_context!())
+        .expect("error while building AI Traffic Lights");
+
+    app.run(|app, event| match event {
+        // The app lives in the tray, and with no session running it has no
+        // windows at all. Closing the last light must therefore not end it —
+        // but "Quit" must, and that arrives with an exit code.
+        tauri::RunEvent::ExitRequested { code, api, .. } => {
+            if code.is_none() {
+                api.prevent_exit();
+            }
+        }
+        // Where the lights were left is written at most once every 800ms, so
+        // the last move of a burst can still be unsaved.
+        tauri::RunEvent::Exit => lights::flush(app),
+        _ => {}
+    });
 }

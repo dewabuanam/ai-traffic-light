@@ -7,10 +7,18 @@
     <link rel="stylesheet" href="style.css" />
   </head>
   <body data-housing="solid">
-    <!-- One light per live session, built in `main.js`. Dragging the window is
-         handled there too rather than with `data-tauri-drag-region`, so that a
-         click on a light can stay a click and focus that session's terminal. -->
-    <div id="lights" class="lights vertical"></div>
+    <!-- One window, one light: which session it shows comes from the query
+         string that `lights.rs` builds. Dragging is handled in `main.js` rather
+         than with `data-tauri-drag-region`, so that a click on the light can
+         stay a click and focus that session's terminal. -->
+    <div id="light" class="light">
+      <div id="housing" class="housing vertical" title="Claude status">
+        <div class="lamp red"><span class="bulb"></span></div>
+        <div class="lamp yellow"><span class="bulb"></span></div>
+        <div class="lamp green"><span class="bulb"></span></div>
+      </div>
+      <div id="label" class="label"></div>
+    </div>
 
     <div id="grip" class="grip" title="Drag to resize"></div>
 

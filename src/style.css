@@ -63,45 +63,27 @@ body[data-housing="none"] {
   --off: rgba(255, 255, 255, 0.07);
 }
 
-/* ---------- the strip of lights ---------- */
+/* ---------- the light ---------- */
 
-/* One light per session. They tile across the short axis, so vertical lights
-   stand side by side and horizontal ones stack up. */
-.lights {
-  display: flex;
-  gap: calc(var(--lamp) * 0.3);
-  align-items: center;
-  justify-content: center;
-}
-
-.lights.vertical {
-  flex-direction: row;
-}
-
-.lights.horizontal {
-  flex-direction: column;
-}
-
-/* A light is its lamps plus the caption underneath, whichever way the lamps
-   run — "under the lamps" is what makes a caption readable.
+/* One light per window now, so this is just the lamps with their caption
+   underneath — "under the lamps" is what makes a caption readable, whichever
+   way the lamps run.
 
    The width is explicit rather than shrink-to-fit. Left to size itself, a light
    takes the width of its widest child, which is the caption: a long project
-   name then pushed the whole row wider than the window and the last light was
-   clipped. Pinned here, the caption is the one that has to give, and it
-   ellipsises. */
+   name then pushed the light wider than its window and the lamps were clipped.
+   Pinned here, the caption is the one that has to give, and it ellipsises. */
 .light {
   display: flex;
   flex-direction: column;
   align-items: center;
-  flex: 0 0 auto;
 }
 
-.lights.vertical .light {
+body:not(.is-horizontal) .light {
   width: var(--across);
 }
 
-.lights.horizontal .light {
+body.is-horizontal .light {
   width: var(--along);
 }
 

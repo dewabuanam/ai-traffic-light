@@ -20,7 +20,8 @@ const SRC = path.resolve(import.meta.dirname, "..", "src");
 // Every id the two pages actually define. Asking for anything else is the bug
 // this check is looking for, so it throws rather than handing back a stub.
 const IDS = new Set([
-  "lights",
+  "light",
+  "label",
   "grip",
   "housing",
   "sound-enabled",
@@ -77,6 +78,10 @@ const stubLampRow = (status) => ({
   classList: { add() {}, remove() {}, toggle() {} },
   querySelector: () => stubElement(`${status}-field`),
 });
+
+// The same stub every time an id is asked for, so what the page painted can be
+// read back off it afterwards.
+const elements = new Map();
 
 const registered = [];
 
@@ -144,7 +149,8 @@ globalThis.document = {
   title: "",
   getElementById(id) {
     if (!IDS.has(id)) throw new Error(`getElementById("${id}") — no such element in the page`);
-    return stubElement(id);
+    if (!elements.has(id)) elements.set(id, stubElement(id));
+    return elements.get(id);
   },
   querySelector: () => stubElement("query"),
   querySelectorAll: (selector) =>
@@ -230,6 +236,12 @@ globalThis.window = {
   },
 };
 
+// `lights.rs` puts the session, and whether the window has ever been placed,
+// in the query string. Without a `location` the light window cannot tell what
+// it is showing.
+globalThis.location = { search: "?session=bbb222&fresh=1&hidden=0" };
+globalThis.URLSearchParams = URLSearchParams;
+
 globalThis.requestAnimationFrame = (fn) => setTimeout(fn, 0);
 
 // Let the microtask queue and one animation frame drain.
@@ -249,12 +261,9 @@ const REQUIRED = {
     "onResized",
     "listen:status-changed",
     "listen:prefs-changed",
-    "listen:visibility-forced",
-    "lights.append",
-    "lights.pointerdown",
+    "light.pointerdown",
     "grip.pointerdown",
-    // Auto-hide has to bring the window back for a live session, and the window
-    // starts hidden, so this is the only thing that ever shows it.
+    // The window is built hidden and shows itself once it is sized.
     "win.show",
     // Nothing is stored in this run, so it is a first run and the light has to
     // put itself in its default corner.
@@ -262,25 +271,24 @@ const REQUIRED = {
   ],
 };
 
-// A light is a housing with three lamps and a caption. Checking the shape, not
-// just that something was appended, is what catches a render that half-ran.
-function describeRow() {
-  // The row is re-appended when it is reordered, so the same node can arrive
-  // more than once. Count nodes, not appends.
-  const roots = [...new Set(built)].filter((node) => node?.className?.startsWith("light"));
-  const housings = roots.flatMap((root) =>
-    (root.children ?? []).filter((child) => child?.className?.startsWith("housing"))
-  );
-  const lamps = housings.flatMap((h) => h.children ?? []);
-  const labels = roots.flatMap((root) =>
-    (root.children ?? []).filter((child) => child?.className === "label")
-  );
-  return { roots: roots.length, housings: housings.length, lamps: lamps.length, labels: labels.length };
+// The elements a light window paints, read back off the stubs. The window has
+// one light now, so the question is not how many were built but whether the
+// right session was found and shown.
+function painted() {
+  const stub = elements.get("housing");
+  const label = elements.get("label");
+  const root = elements.get("light");
+  return {
+    housing: stub?.className ?? "",
+    caption: label?.textContent ?? "",
+    tooltip: root?.title ?? "",
+  };
 }
 
 for (const entry of ["main.js", "settings.js"]) {
   registered.length = 0;
   built.length = 0;
+  elements.clear();
   process.stdout.write(`${entry}: `);
   try {
     await import(`${pathToFileURL(path.join(SRC, entry)).href}?t=${Date.now()}`);
@@ -299,35 +307,49 @@ for (const entry of ["main.js", "settings.js"]) {
   }
 
   if (entry === "main.js") {
-    const row = describeRow();
-    const want = SNAPSHOT.sessions.length;
-    if (row.roots !== want || row.housings !== want || row.lamps !== want * 3 || row.labels !== want) {
+    // The window was told it is showing bbb222, which is deliberately not the
+    // first session in the snapshot: a page that simply takes the first one it
+    // finds has to fail here.
+    const mine = SNAPSHOT.sessions[1];
+    const shown = painted();
+    if (!shown.housing.includes(`is-${mine.status}`) || shown.caption !== mine.title) {
       console.log(
-        `expected ${want} lights with 3 lamps and a caption each, built ` +
-          `${row.roots} lights, ${row.housings} housings, ${row.lamps} lamps, ` +
-          `${row.labels} captions`
+        `showed the wrong session: housing "${shown.housing}", caption ` +
+          `"${shown.caption}" — wanted is-${mine.status} and "${mine.title}"`
       );
       failed = true;
       continue;
     }
-    // Live updates. A session starting and a preference changing both arrive
-    // as events, and both have to rebuild the row — the reason the previous
-    // release shipped a window that never resized was exactly this path.
-    const extra = {
-      session_id: "ccc333",
-      status: "green",
-      title: "docs",
-      detail: "Task finished",
-      cwd: "C:/work/docs",
-      console: 0,
-      pids: [],
+
+    // A status change arrives as an event, and this window must pick its own
+    // session out of it and ignore the rest.
+    const changed = {
+      ...SNAPSHOT,
+      sessions: SNAPSHOT.sessions.map((s) =>
+        s.session_id === mine.session_id ? { ...s, status: "red", detail: "Needs you" } : s
+      ),
     };
-    built.length = 0;
-    handlers.get("status-changed")({ payload: { ...SNAPSHOT, sessions: [...SNAPSHOT.sessions, extra] } });
+    handlers.get("status-changed")({ payload: changed });
     await settle();
-    const grown = describeRow();
-    if (grown.roots !== want + 1) {
-      console.log(`a third session did not add a light: ${grown.roots} lights`);
+    if (!painted().housing.includes("is-red")) {
+      console.log(`a status change did not reach the light (${painted().housing})`);
+      failed = true;
+      continue;
+    }
+
+    // Another session changing must not touch this window.
+    const other = {
+      ...SNAPSHOT,
+      sessions: SNAPSHOT.sessions.map((s) =>
+        s.session_id === mine.session_id
+          ? { ...s, status: "red", detail: "Needs you" }
+          : { ...s, status: "yellow" }
+      ),
+    };
+    handlers.get("status-changed")({ payload: other });
+    await settle();
+    if (!painted().housing.includes("is-red")) {
+      console.log(`another session's change moved this light (${painted().housing})`);
       failed = true;
       continue;
     }
@@ -341,8 +363,8 @@ for (const entry of ["main.js", "settings.js"]) {
     }
 
     console.log(
-      `ok (${registered.length} handlers, ${row.roots} light(s) with captions, ` +
-        `grew to ${grown.roots} on a new session, captions toggled live)`
+      `ok (${registered.length} handlers, showed "${mine.title}", followed its own ` +
+        `session, ignored the others, captions toggled live)`
     );
     continue;
   }
@@ -350,10 +372,12 @@ for (const entry of ["main.js", "settings.js"]) {
   console.log(`ok (${registered.length} handlers)`);
 }
 
-// A returning run. Preferences are stored, so the light must leave its position
-// alone: the user may have dragged it somewhere deliberately, and putting it
-// back on every start is the behaviour that was deliberately ruled out.
+// A light whose position is already remembered. `lights.rs` says so with
+// `fresh=0`, and the window must then leave itself where it is: the user may
+// have dragged it somewhere deliberately, and moving it back on every start is
+// the behaviour that was deliberately ruled out.
 if (!failed) {
+  globalThis.location = { search: "?session=bbb222&fresh=0&hidden=0" };
   STORED.value = {
     along: 264,
     orientation: "vertical",
@@ -366,7 +390,8 @@ if (!failed) {
   };
   registered.length = 0;
   built.length = 0;
-  process.stdout.write("main.js (returning run): ");
+  elements.clear();
+  process.stdout.write("main.js (already placed): ");
   try {
     await import(`${pathToFileURL(path.join(SRC, "main.js")).href}?t=${Date.now()}-again`);
     await settle();

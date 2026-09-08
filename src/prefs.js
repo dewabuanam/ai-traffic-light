@@ -83,25 +83,11 @@ function merge(base, override) {
   return out;
 }
 
-// Set by `loadPrefs`: true when nothing had been stored yet. The light uses it
-// to place itself on first run — and then saves, so the next run is not a first
-// run and whatever position the user has since chosen is left alone.
-let fresh = false;
-
-export function isFirstRun() {
-  return fresh;
-}
-
 export async function loadPrefs() {
   try {
-    const stored = await invoke("get_prefs");
-    fresh = !stored || Object.keys(stored).length === 0;
-    return merge(DEFAULTS, stored);
+    return merge(DEFAULTS, await invoke("get_prefs"));
   } catch (err) {
     console.error("get_prefs failed", err);
-    // Not a first run — just a failed read. Placing the light on top of
-    // wherever the user put it would be the wrong guess here.
-    fresh = false;
     return structuredClone(DEFAULTS);
   }
 }

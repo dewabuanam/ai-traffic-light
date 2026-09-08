@@ -1,0 +1,173 @@
+:root {
+  --lamp: 64px;
+  --gap: calc(var(--lamp) * 0.22);
+  --pad: calc(var(--lamp) * 0.28);
+  --opacity: 1;
+
+  /* Overridden per housing style below. */
+  --housing-bg: linear-gradient(160deg, #22252c 0%, #16181d 55%, #101216 100%);
+  --housing-border: 1px solid #33373f;
+  --housing-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.06);
+  --socket: #0b0c0f;
+  --socket-shadow: inset 0 2px 5px rgba(0, 0, 0, 0.9);
+  --off: #23262c;
+}
+
+* {
+  box-sizing: border-box;
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+html,
+body {
+  margin: 0;
+  height: 100%;
+  background: transparent;
+  overflow: hidden;
+  cursor: default;
+  font: 12px/1.4 "Segoe UI", system-ui, sans-serif;
+}
+
+/* ---------- housing styles ---------- */
+
+/* Translucent: the desktop shows through the casing, lamps stay solid. */
+body[data-housing="translucent"] {
+  --housing-bg: linear-gradient(
+    160deg,
+    rgba(34, 37, 44, 0.5) 0%,
+    rgba(22, 24, 29, 0.5) 55%,
+    rgba(16, 18, 22, 0.5) 100%
+  );
+  --housing-border: 1px solid rgba(255, 255, 255, 0.1);
+  --housing-shadow: none;
+  --socket: rgba(6, 7, 9, 0.72);
+  --off: rgba(255, 255, 255, 0.08);
+}
+
+/* None: no casing at all — three floating lamps over the desktop. */
+body[data-housing="none"] {
+  --housing-bg: none;
+  --housing-border: 0;
+  --housing-shadow: none;
+  --socket: rgba(0, 0, 0, 0.34);
+  --socket-shadow: none;
+  --off: rgba(255, 255, 255, 0.07);
+}
+
+/* ---------- housing ---------- */
+
+.housing {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--gap);
+  padding: var(--pad);
+  border-radius: calc(var(--lamp) * 0.42);
+  background: var(--housing-bg);
+  border: var(--housing-border);
+  /* No outer drop shadow: on a transparent window it bleeds past the rounded
+     corners as a grey smudge instead of falling on a surface. */
+  box-shadow: var(--housing-shadow);
+  opacity: var(--opacity);
+  transition: opacity 0.15s ease;
+}
+
+.housing.vertical {
+  flex-direction: column;
+}
+
+.housing.horizontal {
+  flex-direction: row;
+}
+
+/* ---------- lamps ---------- */
+
+.lamp {
+  width: var(--lamp);
+  height: var(--lamp);
+  flex: 0 0 auto;
+  border-radius: 50%;
+  background: var(--socket);
+  box-shadow: var(--socket-shadow);
+  display: grid;
+  place-items: center;
+  pointer-events: none;
+}
+
+.bulb {
+  width: 84%;
+  height: 84%;
+  border-radius: 50%;
+  background: var(--off);
+  transition: background 0.18s ease, box-shadow 0.18s ease;
+}
+
+/* lit states */
+
+.housing.is-red .red .bulb {
+  background: radial-gradient(circle at 34% 30%, #ff8d84 0%, #f0342a 48%, #96130c 100%);
+  box-shadow: 0 0 calc(var(--lamp) * 0.5) calc(var(--lamp) * 0.06) rgba(240, 52, 42, 0.75);
+  animation: pulse 1.15s ease-in-out infinite;
+}
+
+.housing.is-yellow .yellow .bulb {
+  background: radial-gradient(circle at 34% 30%, #ffe08a 0%, #f5b81c 48%, #9c7000 100%);
+  box-shadow: 0 0 calc(var(--lamp) * 0.5) calc(var(--lamp) * 0.06) rgba(245, 184, 28, 0.7);
+  animation: pulse 1.9s ease-in-out infinite;
+}
+
+.housing.is-green .green .bulb {
+  background: radial-gradient(circle at 34% 30%, #9ff2b3 0%, #2fc95c 48%, #127031 100%);
+  box-shadow: 0 0 calc(var(--lamp) * 0.5) calc(var(--lamp) * 0.06) rgba(47, 201, 92, 0.65);
+}
+
+@keyframes pulse {
+  0%,
+  100% {
+    filter: brightness(1);
+  }
+  50% {
+    filter: brightness(0.68);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .bulb {
+    animation: none !important;
+  }
+}
+
+/* ---------- resize grip ---------- */
+
+/* Only the long axis resizes; the short axis follows the fixed aspect ratio.
+   So the handle is the whole trailing edge rather than a corner. */
+.grip {
+  position: fixed;
+  z-index: 5;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 7px;
+  cursor: ns-resize;
+  opacity: 0;
+  transition: opacity 0.15s ease;
+  background: linear-gradient(to top, rgba(255, 255, 255, 0.4), transparent);
+}
+
+body.is-horizontal .grip {
+  left: auto;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: 7px;
+  height: auto;
+  cursor: ew-resize;
+  background: linear-gradient(to left, rgba(255, 255, 255, 0.4), transparent);
+}
+
+body:hover .grip {
+  opacity: 1;
+}

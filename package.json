@@ -1,0 +1,14 @@
+{
+  "name": "ai-traffic-lights",
+  "version": "1.1.0",
+  "private": true,
+  "description": "Always-on-top traffic light showing Claude Code CLI status",
+  "scripts": {
+    "dev": "tauri dev",
+    "build": "tauri build",
+    "tauri": "tauri"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "^2"
+  }
+}

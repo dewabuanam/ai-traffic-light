@@ -1,0 +1,15 @@
+[package]
+name = "ai-traffic-lights-core"
+description = "Shared status-file logic for AI Traffic Lights"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+
+[lib]
+name = "ai_traffic_lights_core"
+path = "src/lib.rs"
+
+[dependencies]
+serde.workspace = true
+serde_json.workspace = true

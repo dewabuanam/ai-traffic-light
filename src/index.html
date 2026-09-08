@@ -1,0 +1,20 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Claude Traffic Light</title>
+    <link rel="stylesheet" href="style.css" />
+  </head>
+  <body data-housing="solid">
+    <div id="housing" class="housing vertical" data-tauri-drag-region title="Claude status">
+      <div class="lamp red" data-lamp="red"><span class="bulb"></span></div>
+      <div class="lamp yellow" data-lamp="yellow"><span class="bulb"></span></div>
+      <div class="lamp green" data-lamp="green"><span class="bulb"></span></div>
+    </div>
+
+    <div id="grip" class="grip" title="Drag to resize"></div>
+
+    <script type="module" src="main.js"></script>
+  </body>
+</html>

@@ -1,0 +1,15 @@
+[package]
+name = "claude-light-hook"
+description = "Claude Code hook helper that publishes session status"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+
+[[bin]]
+name = "claude-light-hook"
+path = "src/main.rs"
+
+[dependencies]
+ai-traffic-lights-core.workspace = true
+serde_json.workspace = true

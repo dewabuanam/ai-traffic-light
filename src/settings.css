@@ -1,0 +1,234 @@
+:root {
+  color-scheme: dark;
+  --bg: #15171c;
+  --panel: #1d2027;
+  --edge: #2f3540;
+  --text: #dfe3ea;
+  --muted: #8d95a3;
+  --accent: #4c8dff;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  height: 100%;
+}
+
+body {
+  display: flex;
+  flex-direction: column;
+  background: var(--bg);
+  color: var(--text);
+  font: 13px/1.45 "Segoe UI", system-ui, sans-serif;
+}
+
+main {
+  flex: 1;
+  overflow-y: auto;
+  padding: 14px 16px;
+}
+
+section {
+  margin-bottom: 18px;
+}
+
+h2 {
+  margin: 0 0 8px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-height: 32px;
+  padding: 4px 10px;
+  border-radius: 7px;
+  background: var(--panel);
+  margin-bottom: 6px;
+}
+
+.row > label {
+  flex: 1;
+  min-width: 0;
+}
+
+.hint {
+  margin: 8px 2px 0;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+/* ---------- controls ---------- */
+
+select,
+input[type="range"],
+button {
+  font: inherit;
+  color: inherit;
+}
+
+select {
+  min-width: 130px;
+  padding: 4px 6px;
+  border: 1px solid var(--edge);
+  border-radius: 6px;
+  background: #262b34;
+  cursor: pointer;
+}
+
+input[type="checkbox"] {
+  width: 15px;
+  height: 15px;
+  accent-color: var(--accent);
+  cursor: pointer;
+}
+
+.slider {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+input[type="range"] {
+  width: 150px;
+  accent-color: var(--accent);
+  cursor: pointer;
+}
+
+output {
+  width: 48px;
+  text-align: right;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+
+/* ---------- lamp rows ---------- */
+
+.lamp-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 38px;
+  padding: 4px 10px;
+  border-radius: 7px;
+  background: var(--panel);
+  margin-bottom: 6px;
+}
+
+.lamp-row .dot {
+  width: 13px;
+  height: 13px;
+  flex: 0 0 auto;
+  border-radius: 50%;
+}
+
+.dot.red {
+  background: #f0342a;
+  box-shadow: 0 0 8px rgba(240, 52, 42, 0.6);
+}
+
+.dot.yellow {
+  background: #f5b81c;
+  box-shadow: 0 0 8px rgba(245, 184, 28, 0.55);
+}
+
+.dot.green {
+  background: #2fc95c;
+  box-shadow: 0 0 8px rgba(47, 201, 92, 0.5);
+}
+
+.lamp-row .name {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.lamp-row .name,
+.lamp-row .name small {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.lamp-row .name small {
+  color: var(--muted);
+  font-size: 11px;
+}
+
+/* Fixed, not min-width: otherwise the widest option name stretches the select
+   and squeezes the label into two lines. */
+.lamp-row select {
+  flex: 0 0 auto;
+  width: 150px;
+  min-width: 0;
+}
+
+.lamp-row button {
+  width: 26px;
+  height: 26px;
+  flex: 0 0 auto;
+  padding: 0;
+  border: 1px solid var(--edge);
+  border-radius: 6px;
+  background: #262b34;
+  cursor: pointer;
+}
+
+.lamp-row button:hover {
+  background: #333a46;
+}
+
+.lamp-row.off select,
+.lamp-row.off button,
+.lamp-row.off .name {
+  opacity: 0.45;
+}
+
+/* ---------- footer ---------- */
+
+footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  padding: 10px 16px;
+  border-top: 1px solid var(--edge);
+  background: #191c22;
+}
+
+footer button {
+  padding: 6px 14px;
+  border-radius: 6px;
+  border: 1px solid var(--edge);
+  cursor: pointer;
+}
+
+footer .ghost {
+  background: transparent;
+  color: var(--muted);
+}
+
+footer .ghost:hover {
+  background: var(--panel);
+  color: var(--text);
+}
+
+footer .primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+}
+
+footer .primary:hover {
+  background: #3d7bea;
+}

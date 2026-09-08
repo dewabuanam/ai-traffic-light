@@ -1,0 +1,23 @@
+{
+  "_comment": "Reference only - `node hooks/install-hooks.js` merges this into ~/.claude/settings.json for you. Replace the path if you copy it by hand.",
+  "hooks": {
+    "SessionStart": [
+      { "hooks": [{ "type": "command", "command": "\"%LOCALAPPDATA%\AI Traffic Lights\claude-light-hook.exe\" green", "timeout": 5 }] }
+    ],
+    "UserPromptSubmit": [
+      { "hooks": [{ "type": "command", "command": "\"%LOCALAPPDATA%\AI Traffic Lights\claude-light-hook.exe\" yellow", "timeout": 5 }] }
+    ],
+    "PreToolUse": [
+      { "matcher": "*", "hooks": [{ "type": "command", "command": "\"%LOCALAPPDATA%\AI Traffic Lights\claude-light-hook.exe\" yellow", "timeout": 5 }] }
+    ],
+    "Notification": [
+      { "hooks": [{ "type": "command", "command": "\"%LOCALAPPDATA%\AI Traffic Lights\claude-light-hook.exe\" red", "timeout": 5 }] }
+    ],
+    "Stop": [
+      { "hooks": [{ "type": "command", "command": "\"%LOCALAPPDATA%\AI Traffic Lights\claude-light-hook.exe\" green", "timeout": 5 }] }
+    ],
+    "SessionEnd": [
+      { "hooks": [{ "type": "command", "command": "\"%LOCALAPPDATA%\AI Traffic Lights\claude-light-hook.exe\" clear", "timeout": 5 }] }
+    ]
+  }
+}

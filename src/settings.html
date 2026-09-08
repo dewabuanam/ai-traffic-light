@@ -1,0 +1,111 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>AI Traffic Lights — Settings</title>
+    <link rel="stylesheet" href="settings.css" />
+  </head>
+  <body>
+    <main>
+      <section>
+        <h2>Sound</h2>
+
+        <div class="row">
+          <label for="sound-enabled">Play a sound when the light changes</label>
+          <input type="checkbox" id="sound-enabled" />
+        </div>
+
+        <div class="row">
+          <label for="volume">Volume</label>
+          <span class="slider">
+            <input type="range" id="volume" min="0" max="100" step="1" />
+            <output id="volume-out">60%</output>
+          </span>
+        </div>
+
+        <div class="lamps" id="lamps">
+          <div class="lamp-row" data-status="red">
+            <span class="dot red"></span>
+            <span class="name">Red<small>needs your response</small></span>
+            <input type="checkbox" data-field="enabled" aria-label="Enable red sound" />
+            <select data-field="voice" aria-label="Red sound"></select>
+            <button type="button" data-field="test" title="Play">▶</button>
+          </div>
+          <div class="lamp-row" data-status="yellow">
+            <span class="dot yellow"></span>
+            <span class="name">Yellow<small>working</small></span>
+            <input type="checkbox" data-field="enabled" aria-label="Enable yellow sound" />
+            <select data-field="voice" aria-label="Yellow sound"></select>
+            <button type="button" data-field="test" title="Play">▶</button>
+          </div>
+          <div class="lamp-row" data-status="green">
+            <span class="dot green"></span>
+            <span class="name">Green<small>finished</small></span>
+            <input type="checkbox" data-field="enabled" aria-label="Enable green sound" />
+            <select data-field="voice" aria-label="Green sound"></select>
+            <button type="button" data-field="test" title="Play">▶</button>
+          </div>
+        </div>
+      </section>
+
+      <section>
+        <h2>Appearance</h2>
+
+        <div class="row">
+          <label for="housing">Casing</label>
+          <select id="housing">
+            <option value="solid">Solid</option>
+            <option value="translucent">Translucent</option>
+            <option value="none">None — lamps only</option>
+          </select>
+        </div>
+
+        <div class="row">
+          <label for="opacity">Opacity</label>
+          <span class="slider">
+            <input type="range" id="opacity" min="20" max="100" step="1" />
+            <output id="opacity-out">100%</output>
+          </span>
+        </div>
+
+        <div class="row">
+          <label for="orientation">Orientation</label>
+          <select id="orientation">
+            <option value="vertical">Vertical</option>
+            <option value="horizontal">Horizontal</option>
+          </select>
+        </div>
+
+        <div class="row">
+          <label for="along">Size</label>
+          <span class="slider">
+            <input type="range" id="along" min="144" max="900" step="1" />
+            <output id="along-out">264 px</output>
+          </span>
+        </div>
+
+        <p class="hint">
+          The short side is locked to the traffic-light proportion, so the casing always
+          fits the lamps exactly. Drag the trailing edge of the light to resize it.
+        </p>
+      </section>
+
+      <section>
+        <h2>Behaviour</h2>
+
+        <div class="row">
+          <label for="always-on-top">Always on top</label>
+          <input type="checkbox" id="always-on-top" />
+        </div>
+      </section>
+    </main>
+
+    <footer>
+      <button type="button" id="restore" class="ghost">Restore defaults</button>
+      <button type="button" id="close" class="primary">Close</button>
+    </footer>
+
+    <script type="module" src="settings.js"></script>
+  </body>
+</html>

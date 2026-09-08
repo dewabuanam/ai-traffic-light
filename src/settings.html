@@ -80,14 +80,20 @@
         <div class="row">
           <label for="along">Size</label>
           <span class="slider">
-            <input type="range" id="along" min="144" max="900" step="1" />
+            <input type="range" id="along" min="48" max="900" step="1" />
             <output id="along-out">264 px</output>
           </span>
         </div>
 
+        <div class="row">
+          <label for="show-titles">Caption each light with its project</label>
+          <input type="checkbox" id="show-titles" />
+        </div>
+
         <p class="hint">
-          The short side is locked to the traffic-light proportion, so the casing always
-          fits the lamps exactly. Drag the trailing edge of the light to resize it.
+          One light per running session, sized to the traffic-light proportion so the
+          casing always fits the lamps exactly. Drag the trailing edge of the light to
+          resize it, or hold Ctrl and scroll.
         </p>
       </section>
 
@@ -98,6 +104,22 @@
           <label for="always-on-top">Always on top</label>
           <input type="checkbox" id="always-on-top" />
         </div>
+
+        <div class="row">
+          <label for="auto-hide">Hide when no session is running</label>
+          <input type="checkbox" id="auto-hide" />
+        </div>
+
+        <div class="row">
+          <label for="click-focus">Click a light to focus its terminal</label>
+          <input type="checkbox" id="click-focus" />
+        </div>
+
+        <p class="hint">
+          With hiding on, the light disappears when the last session ends and comes back
+          when a new one starts; "Show light" in the tray overrides that until the
+          sessions change.
+        </p>
       </section>
     </main>
 

@@ -11,6 +11,8 @@ use std::io::{IsTerminal, Read};
 
 use ai_traffic_lights_core::{clear_status, now_secs, snapshot, write_status, SessionState, Status};
 
+mod session_host;
+
 fn read_payload() -> serde_json::Value {
     // Only read stdin when something is actually piped in, otherwise a manual
     // run from a terminal would block forever.
@@ -35,7 +37,13 @@ fn main() {
         let snap = snapshot();
         println!("light: {}  ({})", snap.status.as_str(), snap.detail);
         for s in &snap.sessions {
-            println!("  {} {} {}", s.status.as_str(), s.session_id, s.cwd);
+            println!(
+                "  {} {} [{}] {}",
+                s.state.status.as_str(),
+                s.title,
+                s.state.session_id,
+                s.state.cwd
+            );
         }
         return;
     }
@@ -64,11 +72,15 @@ fn main() {
         .or_else(|| std::env::args().nth(2))
         .unwrap_or_default();
 
+    let (console, pids) = session_host::hints();
+
     let state = SessionState {
         status,
         session_id,
         cwd: field(&payload, "cwd").unwrap_or_default().to_string(),
         detail,
+        console,
+        pids,
         updated_at: now_secs(),
     };
 

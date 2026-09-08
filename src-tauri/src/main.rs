@@ -13,7 +13,9 @@ use tauri::{Emitter, Manager, WebviewUrl, WebviewWindowBuilder, Wry};
 
 use tauri_plugin_window_state::StateFlags;
 
-use ai_traffic_lights_core::{clear_status, snapshot, Snapshot, Status};
+use ai_traffic_lights_core::{clear_status, read_sessions, snapshot, Snapshot, Status};
+
+mod focus;
 
 const POLL_INTERVAL: Duration = Duration::from_millis(200);
 
@@ -99,6 +101,19 @@ fn quit_app(app: tauri::AppHandle) {
     app.exit(0);
 }
 
+/// Bring the terminal running a given session to the front. Clicking a light
+/// is the whole point of the caption: you can see which session wants you, so
+/// you should be able to get to it.
+#[tauri::command]
+fn focus_session(session_id: String) -> Result<(), String> {
+    let session = read_sessions()
+        .into_iter()
+        .find(|s| s.session_id == session_id)
+        .ok_or_else(|| format!("session {session_id} is no longer running"))?;
+
+    focus::raise(session.console, &session.pids)
+}
+
 /// Show the settings window, building it the first time (and after the user
 /// closes it, which destroys it).
 #[tauri::command]
@@ -170,17 +185,33 @@ fn show_context_menu(
     state.menu.popup(window).map_err(|e| e.to_string())
 }
 
+/// Show or hide the light on the user's say-so.
+///
+/// The window is done here rather than in the frontend so that "Show light"
+/// still works if the webview is wedged — it is the only way back from a hidden
+/// window. The frontend is told as well, because it is what decides visibility
+/// from the session count and would otherwise undo this on the next status
+/// change.
+fn set_visible(app: &tauri::AppHandle, visible: bool) {
+    if let Some(window) = app.get_webview_window("main") {
+        if visible {
+            let _ = window.unminimize();
+            let _ = window.show();
+            let _ = window.set_focus();
+        } else {
+            let _ = window.hide();
+        }
+    }
+    let _ = app.emit_to("main", "visibility-forced", visible);
+}
+
 fn on_light_menu(app: &tauri::AppHandle, id: &str) {
     match id {
         "ctx-settings" => {
             let _ = open_settings(app.clone());
         }
         "ctx-reset" => reset_status(),
-        "ctx-hide" => {
-            if let Some(w) = app.get_webview_window("main") {
-                let _ = w.hide();
-            }
-        }
+        "ctx-hide" => set_visible(app, false),
         "ctx-quit" => app.exit(0),
         // Everything else changes a preference, which lives in the frontend.
         other => {
@@ -195,7 +226,36 @@ fn tooltip(snap: &Snapshot) -> String {
         Status::Yellow => "In progress",
         Status::Red => "Needs your response",
     };
-    format!("Claude: {label}\n{}", snap.detail)
+    let mut out = format!("Claude: {label}\n{}", snap.detail);
+    // The light shows one lamp column per session, so say when there is more
+    // than one behind the winning status.
+    if snap.sessions.len() > 1 {
+        out.push_str(&format!("\n{} sessions", snap.sessions.len()));
+    }
+    out
+}
+
+/// Everything the light draws: the winning status, and every session's own lamp
+/// and caption. Heartbeat timestamps are deliberately left out — they change on
+/// every poll, and nothing on screen depends on them. `snapshot` returns the
+/// sessions in a stable order, so this does not flap either.
+type UiKey = (Status, String, Vec<(String, Status, String)>);
+
+fn ui_key(snap: &Snapshot) -> UiKey {
+    (
+        snap.status,
+        snap.detail.clone(),
+        snap.sessions
+            .iter()
+            .map(|s| {
+                (
+                    s.state.session_id.clone(),
+                    s.state.status,
+                    s.state.detail.clone(),
+                )
+            })
+            .collect(),
+    )
 }
 
 fn main() {
@@ -218,7 +278,8 @@ fn main() {
             open_settings,
             show_context_menu,
             get_prefs,
-            set_prefs
+            set_prefs,
+            focus_session
         ])
         .on_menu_event(|app, event| on_light_menu(app, event.id().as_ref()))
         .setup(|app| {
@@ -240,17 +301,8 @@ fn main() {
                 .menu(&menu)
                 .show_menu_on_left_click(false)
                 .on_menu_event(|app, event| match event.id().as_ref() {
-                    "show" => {
-                        if let Some(w) = app.get_webview_window("main") {
-                            let _ = w.show();
-                            let _ = w.set_focus();
-                        }
-                    }
-                    "hide" => {
-                        if let Some(w) = app.get_webview_window("main") {
-                            let _ = w.hide();
-                        }
-                    }
+                    "show" => set_visible(app, true),
+                    "hide" => set_visible(app, false),
                     "settings" => {
                         let _ = open_settings(app.clone());
                     }
@@ -261,10 +313,10 @@ fn main() {
 
             // Poll the session files and push changes to the UI + tray tooltip.
             std::thread::spawn(move || {
-                let mut last: Option<(Status, String)> = None;
+                let mut last: Option<UiKey> = None;
                 loop {
                     let snap = snapshot();
-                    let key = (snap.status, snap.detail.clone());
+                    let key = ui_key(&snap);
                     if last.as_ref() != Some(&key) {
                         let _ = tray.set_tooltip(Some(tooltip(&snap)));
                         let _ = handle.emit("status-changed", &snap);

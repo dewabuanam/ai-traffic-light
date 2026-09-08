@@ -19,7 +19,7 @@ dependencies = [
 
 [[package]]
 name = "ai-traffic-lights"
-version = "1.1.2"
+version = "1.2.0"
 dependencies = [
  "ai-traffic-lights-core",
  "serde",
@@ -27,11 +27,12 @@ dependencies = [
  "tauri",
  "tauri-build",
  "tauri-plugin-window-state",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
 name = "ai-traffic-lights-core"
-version = "1.1.2"
+version = "1.2.0"
 dependencies = [
  "serde",
  "serde_json",
@@ -349,10 +350,11 @@ dependencies = [
 
 [[package]]
 name = "claude-light-hook"
-version = "1.1.2"
+version = "1.2.0"
 dependencies = [
  "ai-traffic-lights-core",
  "serde_json",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]

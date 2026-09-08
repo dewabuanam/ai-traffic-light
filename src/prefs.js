@@ -11,18 +11,24 @@ const { listen } = window.__TAURI__.event;
 const CHANNEL = "prefs-changed";
 const ME = Math.random().toString(36).slice(2);
 
-// Geometry of the housing, in multiples of one lamp diameter. `main.js` uses the
-// same numbers to size the lamps, and they fix the window's aspect ratio.
+// Geometry of one light, in multiples of one lamp diameter. `main.js` sizes the
+// lamps from the same numbers, and they fix the window's aspect ratio.
 export const GAP_RATIO = 0.22;
 export const PAD_RATIO = 0.28;
 export const ALONG_UNITS = 3 + 2 * GAP_RATIO + 2 * PAD_RATIO;
 export const ACROSS_UNITS = 1 + 2 * PAD_RATIO;
 export const ASPECT = ACROSS_UNITS / ALONG_UNITS;
 
-export const MIN_ALONG = 144;
+// The caption strip under a light's lamps, and the space between two lights.
+export const LABEL_UNITS = 0.42;
+export const LIGHT_GAP_UNITS = 0.3;
+
+// `along` is the lamp axis of a *single* light, caption excluded, so the light
+// keeps its proportions no matter how many sessions are running.
+export const MIN_ALONG = 48;
 export const MAX_ALONG = 900;
 
-export const SIZES = { small: 176, medium: 264, large: 384 };
+export const SIZES = { small: 112, medium: 264, large: 384 };
 
 export const DEFAULTS = {
   alwaysOnTop: true,
@@ -30,6 +36,13 @@ export const DEFAULTS = {
   housing: "solid", // solid | translucent | none
   orientation: "vertical", // vertical | horizontal
   along: SIZES.medium,
+  // Hide the light when no session is running, and bring it back when one
+  // starts, so an idle desktop is not decorated with a dead traffic light.
+  autoHide: true,
+  // Caption each light with its session's folder name.
+  showTitles: true,
+  // Clicking a light raises the terminal that session is running in.
+  clickFocus: true,
   sound: {
     enabled: true,
     volume: 0.6,
@@ -83,9 +96,38 @@ export function clamp(value, min, max) {
   return Math.min(max, Math.max(min, value));
 }
 
-/// Window size for a given long-axis length, with the width locked to the ratio.
-export function sizeFor(along, orientation) {
-  const a = Math.round(clamp(along, MIN_ALONG, MAX_ALONG));
-  const across = Math.round(a * ASPECT);
-  return orientation === "horizontal" ? { w: a, h: across } : { w: across, h: a };
+/// The whole window's footprint in lamp diameters, for `count` lights.
+///
+/// Lights tile across the short axis — side by side when they are vertical,
+/// stacked when they are horizontal — and the caption always sits under a
+/// light's lamps, which puts it on the long axis when vertical and on the short
+/// axis when horizontal.
+export function unitsFor(orientation, count = 1, labels = true) {
+  const n = Math.max(1, count);
+  const label = labels ? LABEL_UNITS : 0;
+  const gaps = (n - 1) * LIGHT_GAP_UNITS;
+  return orientation === "horizontal"
+    ? { along: ALONG_UNITS, across: n * (ACROSS_UNITS + label) + gaps }
+    : { along: ALONG_UNITS + label, across: n * ACROSS_UNITS + gaps };
+}
+
+/// Window size for a given single-light long-axis length. Both axes come out of
+/// `along`, so the lights always fit the window exactly.
+export function sizeFor(along, orientation, count = 1, labels = true) {
+  const a = clamp(Math.round(along), MIN_ALONG, MAX_ALONG);
+  const lamp = a / ALONG_UNITS;
+  const units = unitsFor(orientation, count, labels);
+  const alongPx = Math.round(lamp * units.along);
+  const acrossPx = Math.round(lamp * units.across);
+  return orientation === "horizontal"
+    ? { w: alongPx, h: acrossPx }
+    : { w: acrossPx, h: alongPx };
+}
+
+/// The inverse: a dragged window length on the long axis back to `along`. The
+/// caption rides on that axis when the lights are vertical, so it has to come
+/// back off again or the light would grow by a caption on every drag.
+export function alongFrom(length, orientation, count = 1, labels = true) {
+  const units = unitsFor(orientation, count, labels);
+  return (length * ALONG_UNITS) / units.along;
 }

@@ -24,7 +24,10 @@ const el = {
   orientation: document.getElementById("orientation"),
   along: document.getElementById("along"),
   alongOut: document.getElementById("along-out"),
+  showTitles: document.getElementById("show-titles"),
   alwaysOnTop: document.getElementById("always-on-top"),
+  autoHide: document.getElementById("auto-hide"),
+  clickFocus: document.getElementById("click-focus"),
   restore: document.getElementById("restore"),
   close: document.getElementById("close"),
 };
@@ -70,7 +73,10 @@ function fill() {
   el.orientation.value = prefs.orientation;
   el.along.value = String(clamp(prefs.along, MIN_ALONG, MAX_ALONG));
   el.alongOut.textContent = `${el.along.value} px`;
+  el.showTitles.checked = prefs.showTitles;
   el.alwaysOnTop.checked = prefs.alwaysOnTop;
+  el.autoHide.checked = prefs.autoHide;
+  el.clickFocus.checked = prefs.clickFocus;
 }
 
 /* ---------------- form -> prefs ---------------- */
@@ -133,8 +139,23 @@ el.along.addEventListener("input", () => {
   savePrefs(prefs);
 });
 
+el.showTitles.addEventListener("change", () => {
+  prefs.showTitles = el.showTitles.checked;
+  commit();
+});
+
 el.alwaysOnTop.addEventListener("change", () => {
   prefs.alwaysOnTop = el.alwaysOnTop.checked;
+  commit();
+});
+
+el.autoHide.addEventListener("change", () => {
+  prefs.autoHide = el.autoHide.checked;
+  commit();
+});
+
+el.clickFocus.addEventListener("change", () => {
+  prefs.clickFocus = el.clickFocus.checked;
   commit();
 });
 

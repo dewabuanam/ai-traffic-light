@@ -56,7 +56,51 @@ pub struct SessionState {
     pub cwd: String,
     #[serde(default)]
     pub detail: String,
+    /// The console window this session is running in, so clicking its light can
+    /// bring that terminal to the front. `0` when the hook could not find one.
+    #[serde(default)]
+    pub console: u64,
+    /// The session's process and its ancestors, nearest first. A classic
+    /// console window belongs to a `conhost.exe` *child* of the shell rather
+    /// than to any of these, which is why `console` is tried first; this is the
+    /// fallback for hosts that own their window themselves, such as Windows
+    /// Terminal. Written by the hook, which is the only thing that runs inside
+    /// the session and can see its process tree.
+    #[serde(default)]
+    pub pids: Vec<u32>,
     pub updated_at: u64,
+}
+
+impl SessionState {
+    /// The label the light is captioned with: the working directory's folder
+    /// name, which is how the user recognises which session is which. Falls
+    /// back to a slice of the session id when there is no `cwd`.
+    pub fn title(&self) -> String {
+        match self
+            .cwd
+            .rsplit(['/', '\\'])
+            .find(|part| !part.is_empty())
+        {
+            Some(name) => name.to_string(),
+            None => self.session_id.chars().take(6).collect(),
+        }
+    }
+}
+
+/// One session as the UI sees it: its stored state plus the derived title, so
+/// the caption has a single definition rather than one per window.
+#[derive(Debug, Clone, Serialize)]
+pub struct SessionView {
+    #[serde(flatten)]
+    pub state: SessionState,
+    pub title: String,
+}
+
+impl From<SessionState> for SessionView {
+    fn from(state: SessionState) -> Self {
+        let title = state.title();
+        SessionView { state, title }
+    }
 }
 
 /// Aggregate of every live session, plus the winning status.
@@ -64,7 +108,7 @@ pub struct SessionState {
 pub struct Snapshot {
     pub status: Status,
     pub detail: String,
-    pub sessions: Vec<SessionState>,
+    pub sessions: Vec<SessionView>,
 }
 
 pub fn now_secs() -> u64 {
@@ -148,11 +192,22 @@ pub fn read_sessions() -> Vec<SessionState> {
 
 /// Red beats yellow beats green: if any session needs you, the light is red.
 pub fn snapshot() -> Snapshot {
-    let sessions = read_sessions();
-    let winner = sessions
+    let states = read_sessions();
+    let winner = states
         .iter()
         .max_by_key(|s| (s.status.rank(), s.updated_at))
         .cloned();
+
+    // Stable order for the UI: one light per session, and they must not swap
+    // places every time a heartbeat lands. Grouped by directory so lights from
+    // the same project sit together.
+    let mut sessions: Vec<SessionView> = states.into_iter().map(SessionView::from).collect();
+    sessions.sort_by(|a, b| {
+        a.state
+            .cwd
+            .cmp(&b.state.cwd)
+            .then_with(|| a.state.session_id.cmp(&b.state.session_id))
+    });
 
     match winner {
         Some(s) => Snapshot {

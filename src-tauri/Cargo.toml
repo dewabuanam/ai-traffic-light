@@ -19,3 +19,10 @@ tauri-plugin-window-state = "2"
 ai-traffic-lights-core.workspace = true
 serde.workspace = true
 serde_json.workspace = true
+
+# Finding and raising the terminal window a session belongs to.
+[target.'cfg(windows)'.dependencies]
+windows-sys = { workspace = true, features = [
+  "Win32_Foundation",
+  "Win32_UI_WindowsAndMessaging",
+] }

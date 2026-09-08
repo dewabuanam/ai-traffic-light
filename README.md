@@ -8,6 +8,12 @@ An always-on-top, resizable traffic light for **Claude Code CLI** status.
 | 🟡 Yellow | Claude is working on the task |
 | 🟢 Green | Task finished / idle |
 
+**One light per session.** Run Claude Code in three projects and you get three
+traffic lights side by side, each captioned with its project folder, each
+showing that session's own status. Click one to jump to the terminal it is
+running in. With nothing running the light hides itself, and it comes back the
+moment a session starts.
+
 The window is frameless and transparent, floats above every other window, can be
 dragged anywhere and resized, and lives in the system tray. Each colour has its
 own sound, and the casing can be made translucent or hidden altogether.
@@ -33,16 +39,28 @@ The Tauri app watches that folder and lights the matching lamp.
 | `Stop` | 🟢 green |
 | `SessionEnd` | clears the session |
 
-**Multiple sessions at once:** every session gets its own file and the most
-urgent one wins — any red makes the light red, otherwise any yellow makes it
-yellow, otherwise green. Sessions with no update for 12 hours are pruned.
+**Multiple sessions at once:** every session gets its own file, and every file
+gets its own traffic light, captioned with the folder name from the session's
+`cwd`. The lights are ordered by directory so they do not shuffle around as
+sessions report in. The tray icon still summarises them all — any red makes it
+red, otherwise any yellow makes it yellow, otherwise green — and its tooltip
+says how many sessions are behind that. Sessions with no update for 12 hours are
+pruned.
+
+**Jumping to a session:** the hook is the only part of this that runs *inside*
+the session, so it records how to find the terminal — the console window it
+inherited, plus its ancestor process ids (the walk stops before the desktop, so
+a click can never raise a File Explorer window). Clicking a light tries the
+console window first, which is the real window in a classic console, and falls
+back to the first ancestor process that owns a visible titled window, which is
+how Windows Terminal and VS Code are found.
 
 ## Install
 
 1. Run the installer from `target/release/bundle/`:
-   - `AI Traffic Lights_1.1.2_x64-setup.exe` — NSIS, per-user, no admin
+   - `AI Traffic Lights_1.2.0_x64-setup.exe` — NSIS, per-user, no admin
      required, installs to `%LOCALAPPDATA%\AI Traffic Lights\`
-   - `AI Traffic Lights_1.1.2_x64_en-US.msi` — MSI, per-machine, needs admin
+   - `AI Traffic Lights_1.2.0_x64_en-US.msi` — MSI, per-machine, needs admin
 2. Register the Claude Code hooks:
 
    ```powershell
@@ -72,7 +90,10 @@ rather paste it in by hand.
 
 ## Using the light
 
-- **Move** — drag the housing anywhere.
+- **Move** — drag any light. A press that travels more than a few pixels moves
+  the window; one that stays put is a click.
+- **Click a light** — brings the terminal that session is running in to the
+  front. Turn it off with *Click a light to focus its terminal*.
 - **Resize** — drag the trailing edge (the bottom when vertical, the right when
   horizontal), or hold <kbd>Ctrl</kbd> and scroll. Only that one edge resizes,
   and only the long side is dragged: the short side follows it, staying on the
@@ -82,7 +103,11 @@ rather paste it in by hand.
 - **Right-click** — settings, always-on-top toggle, rotate, size presets, reset
   to green, hide to tray, quit.
 - **Tray icon** — show, hide, settings or quit. Hovering it shows the current
-  status text.
+  status text and the session count.
+- **Auto-hide** — with no session running the light hides itself and reappears
+  when one starts. *Show light* and *Hide to tray* override that until the
+  sessions change, so a deliberate choice is never undone a moment later. Asking
+  for the light with nothing running shows a single dimmed placeholder.
 
 Everything persists between runs, in
 
@@ -118,8 +143,11 @@ preview each and a master volume.
 | Casing | `Solid`, `Translucent` (the desktop shows through), or `None` — three floating lamps with no housing |
 | Opacity | 20–100% for the whole light |
 | Orientation | Vertical or horizontal |
-| Size | Long side, 144–900 px; the short side follows automatically |
+| Size | Long side of one light, 48–900 px; the short side follows automatically |
+| Caption each light with its project | The folder name under each light's lamps |
 | Always on top | Float above other windows |
+| Hide when no session is running | Auto-hide, and reappear when a session starts |
+| Click a light to focus its terminal | Raise the terminal the session is running in |
 
 Changes apply live to the light as you make them.
 
@@ -147,6 +175,12 @@ the window still paints and the lamps still light from an already-issued
 loads each module against a stub DOM and stub `window.__TAURI__` and fails if
 one throws or never reaches the handlers it must register.
 
+It also feeds the light window a two-session snapshot and asserts it builds a
+light per session — housing, three lamps, caption — then delivers a
+`status-changed` for a third session and a `prefs-changed` turning captions off,
+and fails if either does not reach the page. Those are the paths that are silent
+when they break: the row simply stops keeping up with the sessions.
+
 ### Layout
 
 ```
@@ -162,6 +196,10 @@ hooks/           hook installer + example settings snippet
 scripts/         build-sidecar.js, stages the helper for bundling
 ```
 
+`crates/hook/src/session_host.rs` works out which terminal a session is running
+in; `src-tauri/src/focus.rs` is the other half, which finds and raises that
+window when a light is clicked.
+
 The helper is bundled as a Tauri **sidecar**, so it is installed next to the app
 executable and lands in a predictable place for the hook configuration.
 
@@ -173,6 +211,20 @@ settings apply live.
 The light's right-click menu is a native menu built in Rust. The window is
 smaller than any useful menu, so an HTML one would be clipped by the webview.
 
+The window is sized from two numbers: the long side of a *single* light, which
+is the size preference, and how many sessions are running. `prefs.js` holds the
+whole layout in multiples of one lamp diameter (`unitsFor`), so the window size
+and the lamp size cannot drift apart — `sizeFor` goes one way for the window and
+`alongFrom` comes back the other way when the grip is dragged. Lights tile
+across the short axis, and a caption always sits under a light's lamps, which
+puts it on the long axis when the lights are vertical and on the short axis when
+they are horizontal.
+
+Lights are reconciled rather than rebuilt: a status change repaints the existing
+elements, so the lamp glow and the red pulse are not restarted on every light in
+the row each time one session reports in. The row is only re-appended, which
+restarts animations, when the set of sessions actually changes.
+
 Resizing is driven entirely from the frontend, and the window is declared
 `resizable: false` so that the OS cannot resize it at all. A native resize moves
 only the edge being pulled, which cannot work here: the short side is derived
@@ -182,6 +234,16 @@ window gets that for free — and the press never reached the webview, so the OS
 dragged one edge while our correction pulled the other back, and the window
 flickered between the two sizes for the whole gesture.
 
+The lights are not a `data-tauri-drag-region` either, for the same kind of
+reason: that hands the press to the OS move loop, which swallows the click a
+light needs in order to focus its terminal. Moving and clicking are told apart
+by how far the pointer travels instead.
+
+Visibility is decided in the frontend, from the session count — but *Show light*
+and *Hide to tray* move the window in Rust as well as telling the frontend, so
+the tray can always bring the light back even if the webview is wedged. It is
+the only way back from a hidden window.
+
 ## Troubleshooting
 
 Check what the app thinks the status is:
@@ -190,10 +252,20 @@ Check what the app thinks the status is:
 & "$env:LOCALAPPDATA\AI Traffic Lights\claude-light-hook.exe" status
 ```
 
-It prints the winning light plus every live session. If it reports
-`No active Claude session`, the hooks are not firing — confirm they are present
-in `~/.claude/settings.json` and that you restarted Claude Code. Running
-`claude --debug` shows hook execution in the log.
+It prints the winning light plus every live session, each with the caption its
+light will carry. If it reports `No active Claude session`, the hooks are not
+firing — confirm they are present in `~/.claude/settings.json` and that you
+restarted Claude Code. Running `claude --debug` shows hook execution in the log.
+
+**The light is not there at all.** With no session running that is the intended
+behaviour — it hides itself. Pick *Show light* from the tray to bring it back,
+or turn *Hide when no session is running* off in the settings.
+
+**Clicking a light does not focus anything.** The hook records how to find the
+terminal when it writes a status, so a session that has not fired a hook since
+the app was installed has nothing recorded — the next status change fixes it.
+Windows Terminal shares one window between its tabs, so the click raises the
+window but cannot switch to the session's tab.
 
 Set a light by hand to check the app is watching:
 

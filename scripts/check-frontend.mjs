@@ -32,6 +32,12 @@ const IDS = new Set([
   "along",
   "along-out",
   "show-titles",
+  "default-corner",
+  "default-margin",
+  "default-margin-out",
+  "default-along",
+  "default-along-out",
+  "go-home",
   "always-on-top",
   "auto-hide",
   "click-focus",
@@ -100,6 +106,10 @@ const SNAPSHOT = {
     },
   ],
 };
+
+// What `get_prefs` hands back. Empty is a first run — nothing has ever been
+// stored, so nothing has ever placed the light.
+const STORED = { value: {} };
 
 // Event handlers the page registered, by event name.
 const handlers = new Map();
@@ -175,6 +185,7 @@ globalThis.window = {
         // Two live sessions, so the light window has to build a row rather than
         // the single light it would get away with from an empty snapshot.
         if (command === "get_status") return Promise.resolve(SNAPSHOT);
+        if (command === "get_prefs") return Promise.resolve(STORED.value);
         return Promise.resolve({});
       },
     },
@@ -245,6 +256,9 @@ const REQUIRED = {
     // Auto-hide has to bring the window back for a live session, and the window
     // starts hidden, so this is the only thing that ever shows it.
     "win.show",
+    // Nothing is stored in this run, so it is a first run and the light has to
+    // put itself in its default corner.
+    "invoke:place_light",
   ],
 };
 
@@ -334,6 +348,38 @@ for (const entry of ["main.js", "settings.js"]) {
   }
 
   console.log(`ok (${registered.length} handlers)`);
+}
+
+// A returning run. Preferences are stored, so the light must leave its position
+// alone: the user may have dragged it somewhere deliberately, and putting it
+// back on every start is the behaviour that was deliberately ruled out.
+if (!failed) {
+  STORED.value = {
+    along: 264,
+    orientation: "vertical",
+    showTitles: true,
+    autoHide: true,
+    clickFocus: true,
+    defaultCorner: "top-right",
+    defaultMargin: 40,
+    defaultAlong: 264,
+  };
+  registered.length = 0;
+  built.length = 0;
+  process.stdout.write("main.js (returning run): ");
+  try {
+    await import(`${pathToFileURL(path.join(SRC, "main.js")).href}?t=${Date.now()}-again`);
+    await settle();
+    if (registered.includes("invoke:place_light")) {
+      console.log("moved the light even though a position was already stored");
+      failed = true;
+    } else {
+      console.log("ok (left the light where it was)");
+    }
+  } catch (error) {
+    console.log(`threw while evaluating — ${error?.message ?? error}`);
+    failed = true;
+  }
 }
 
 if (failed) {

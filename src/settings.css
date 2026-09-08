@@ -197,6 +197,22 @@ output {
 
 /* ---------- footer ---------- */
 
+/* An action inside a section, rather than in the footer: it acts on the light
+   right away, so it sits with the settings it applies. */
+.row > button {
+  flex: 1;
+  padding: 6px 14px;
+  border-radius: 6px;
+  border: 1px solid var(--edge);
+  background: transparent;
+  color: var(--text);
+  cursor: pointer;
+}
+
+.row > button:hover {
+  background: #22262e;
+}
+
 footer {
   display: flex;
   justify-content: flex-end;

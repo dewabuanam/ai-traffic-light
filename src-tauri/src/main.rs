@@ -101,6 +101,67 @@ fn quit_app(app: tauri::AppHandle) {
     app.exit(0);
 }
 
+/// Put the light on a corner of the screen it is currently on.
+///
+/// Done here rather than in the frontend because this needs the monitor's *work
+/// area* — the screen minus the taskbar — which the webview cannot see. A light
+/// placed in the bottom-right from JS would sit behind the taskbar.
+///
+/// `margin` is in logical pixels, like every other size in the preferences.
+#[tauri::command]
+fn place_light(app: tauri::AppHandle, corner: String, margin: f64) -> Result<(), String> {
+    let window = app
+        .get_webview_window("main")
+        .ok_or_else(|| "no light window".to_string())?;
+
+    // `current_monitor` is the one the light is on now; on a fresh install the
+    // window has not been shown yet, so fall back to the primary.
+    let monitor = window
+        .current_monitor()
+        .map_err(|e| e.to_string())?
+        .or(window.primary_monitor().map_err(|e| e.to_string())?)
+        .ok_or_else(|| "no monitor".to_string())?;
+
+    let scale = monitor.scale_factor();
+    let area = monitor.work_area();
+    let screen = area.size.to_logical::<f64>(scale);
+    let origin = area.position.to_logical::<f64>(scale);
+    let size = window
+        .outer_size()
+        .map_err(|e| e.to_string())?
+        .to_logical::<f64>(scale);
+
+    // Never let the margin push the light off a screen too small for it.
+    let free_x = (screen.width - size.width).max(0.0);
+    let free_y = (screen.height - size.height).max(0.0);
+    let inset_x = margin.clamp(0.0, free_x);
+    let inset_y = margin.clamp(0.0, free_y);
+
+    let (x, y) = match corner.as_str() {
+        "top-left" => (inset_x, inset_y),
+        "bottom-left" => (inset_x, free_y - inset_y),
+        "bottom-right" => (free_x - inset_x, free_y - inset_y),
+        "centre" => (free_x / 2.0, free_y / 2.0),
+        // Anything unrecognised lands top-right, which is the default.
+        _ => (free_x - inset_x, inset_y),
+    };
+
+    window
+        .set_position(tauri::LogicalPosition::new(origin.x + x, origin.y + y))
+        .map_err(|e| e.to_string())
+}
+
+/// Ask the light to go to its default position and size.
+///
+/// The light does it itself rather than being moved from here, because where a
+/// bottom or right corner puts the window depends on how big it is, and the
+/// light is what owns its size.
+#[tauri::command]
+fn send_light_home(app: tauri::AppHandle) -> Result<(), String> {
+    app.emit_to("main", "menu-action", "home")
+        .map_err(|e| e.to_string())
+}
+
 /// Bring the terminal running a given session to the front. Clicking a light
 /// is the whole point of the caption: you can see which session wants you, so
 /// you should be able to get to it.
@@ -155,6 +216,7 @@ fn build_light_menu(app: &tauri::App) -> tauri::Result<LightMenu> {
             &PredefinedMenuItem::separator(app)?,
             &on_top,
             &MenuItem::with_id(app, "ctx-rotate", "Rotate", true, None::<&str>)?,
+            &MenuItem::with_id(app, "ctx-home", "Move to default position", true, None::<&str>)?,
             &PredefinedMenuItem::separator(app)?,
             &MenuItem::with_id(app, "ctx-small", "Small", true, None::<&str>)?,
             &MenuItem::with_id(app, "ctx-medium", "Medium", true, None::<&str>)?,
@@ -279,7 +341,9 @@ fn main() {
             show_context_menu,
             get_prefs,
             set_prefs,
-            focus_session
+            focus_session,
+            place_light,
+            send_light_home
         ])
         .on_menu_event(|app, event| on_light_menu(app, event.id().as_ref()))
         .setup(|app| {

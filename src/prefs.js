@@ -30,12 +30,30 @@ export const MAX_ALONG = 900;
 
 export const SIZES = { small: 112, medium: 264, large: 384 };
 
+// Where the light goes when it has nowhere else to be: first run, "Restore
+// defaults", and "Move light there now". Corners rather than coordinates,
+// because a saved x/y lands off-screen as soon as the display setup changes.
+export const CORNERS = {
+  "top-left": "Top left",
+  "top-right": "Top right",
+  "bottom-left": "Bottom left",
+  "bottom-right": "Bottom right",
+  centre: "Centre",
+};
+
+export const MAX_MARGIN = 200;
+
 export const DEFAULTS = {
   alwaysOnTop: true,
   opacity: 1,
   housing: "solid", // solid | translucent | none
   orientation: "vertical", // vertical | horizontal
   along: SIZES.medium,
+  // The light's home: see CORNERS. `defaultAlong` is the size it goes back to,
+  // kept apart from `along` so experimenting with the size does not lose it.
+  defaultCorner: "top-right",
+  defaultMargin: 40,
+  defaultAlong: SIZES.medium,
   // Hide the light when no session is running, and bring it back when one
   // starts, so an idle desktop is not decorated with a dead traffic light.
   autoHide: true,
@@ -65,11 +83,25 @@ function merge(base, override) {
   return out;
 }
 
+// Set by `loadPrefs`: true when nothing had been stored yet. The light uses it
+// to place itself on first run — and then saves, so the next run is not a first
+// run and whatever position the user has since chosen is left alone.
+let fresh = false;
+
+export function isFirstRun() {
+  return fresh;
+}
+
 export async function loadPrefs() {
   try {
-    return merge(DEFAULTS, await invoke("get_prefs"));
+    const stored = await invoke("get_prefs");
+    fresh = !stored || Object.keys(stored).length === 0;
+    return merge(DEFAULTS, stored);
   } catch (err) {
     console.error("get_prefs failed", err);
+    // Not a first run — just a failed read. Placing the light on top of
+    // wherever the user put it would be the wrong guess here.
+    fresh = false;
     return structuredClone(DEFAULTS);
   }
 }
@@ -117,8 +149,12 @@ export function sizeFor(along, orientation, count = 1, labels = true) {
   const a = clamp(Math.round(along), MIN_ALONG, MAX_ALONG);
   const lamp = a / ALONG_UNITS;
   const units = unitsFor(orientation, count, labels);
-  const alongPx = Math.round(lamp * units.along);
-  const acrossPx = Math.round(lamp * units.across);
+  // Rounded up, never down: a window half a pixel narrower than the row it
+  // holds clips the last light, while half a pixel too wide is transparent
+  // margin on a transparent window. Three lights at the default size land on
+  // exactly that half pixel (348.48).
+  const alongPx = Math.ceil(lamp * units.along);
+  const acrossPx = Math.ceil(lamp * units.across);
   return orientation === "horizontal"
     ? { w: alongPx, h: acrossPx }
     : { w: acrossPx, h: alongPx };

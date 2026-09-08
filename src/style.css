@@ -83,12 +83,26 @@ body[data-housing="none"] {
 }
 
 /* A light is its lamps plus the caption underneath, whichever way the lamps
-   run — "under the lamps" is what makes a caption readable. */
+   run — "under the lamps" is what makes a caption readable.
+
+   The width is explicit rather than shrink-to-fit. Left to size itself, a light
+   takes the width of its widest child, which is the caption: a long project
+   name then pushed the whole row wider than the window and the last light was
+   clipped. Pinned here, the caption is the one that has to give, and it
+   ellipsises. */
 .light {
   display: flex;
   flex-direction: column;
   align-items: center;
   flex: 0 0 auto;
+}
+
+.lights.vertical .light {
+  width: var(--across);
+}
+
+.lights.horizontal .light {
+  width: var(--along);
 }
 
 /* Only meaningful once clicking a light focuses its terminal. */
@@ -99,9 +113,11 @@ body[data-click-focus="on"] .light {
 /* ---------- caption ---------- */
 
 /* Held to the width of the light above it, so a long project name truncates
-   instead of pushing its neighbours apart. The full name is in the tooltip. */
+   instead of pushing its neighbours apart. The full name is in the tooltip.
+   `width`, not `max-width`: the light's width is definite, so this resolves
+   against it and `text-overflow` has something to bite on. */
 .label {
-  max-width: 100%;
+  width: 100%;
   height: calc(var(--lamp) * 0.42);
   line-height: calc(var(--lamp) * 0.42);
   font-size: calc(var(--lamp) * 0.26);

@@ -98,6 +98,41 @@
       </section>
 
       <section>
+        <h2>Placement</h2>
+
+        <div class="row">
+          <label for="default-corner">Default position</label>
+          <select id="default-corner"></select>
+        </div>
+
+        <div class="row">
+          <label for="default-margin">Margin from the edges</label>
+          <span class="slider">
+            <input type="range" id="default-margin" min="0" max="200" step="1" />
+            <output id="default-margin-out">40 px</output>
+          </span>
+        </div>
+
+        <div class="row">
+          <label for="default-along">Default size</label>
+          <span class="slider">
+            <input type="range" id="default-along" min="48" max="900" step="1" />
+            <output id="default-along-out">264 px</output>
+          </span>
+        </div>
+
+        <div class="row">
+          <button type="button" id="go-home" class="ghost">Move light there now</button>
+        </div>
+
+        <p class="hint">
+          Where the light goes on first run, on <em>Restore defaults</em>, and when you
+          ask for it here — the same is on the light's right-click menu. Dragging the
+          light somewhere else still sticks: the position is remembered between runs.
+        </p>
+      </section>
+
+      <section>
         <h2>Behaviour</h2>
 
         <div class="row">

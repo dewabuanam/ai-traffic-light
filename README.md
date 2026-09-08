@@ -58,9 +58,9 @@ how Windows Terminal and VS Code are found.
 ## Install
 
 1. Run the installer from `target/release/bundle/`:
-   - `AI Traffic Lights_1.2.0_x64-setup.exe` — NSIS, per-user, no admin
+   - `AI Traffic Lights_1.3.0_x64-setup.exe` — NSIS, per-user, no admin
      required, installs to `%LOCALAPPDATA%\AI Traffic Lights\`
-   - `AI Traffic Lights_1.2.0_x64_en-US.msi` — MSI, per-machine, needs admin
+   - `AI Traffic Lights_1.3.0_x64_en-US.msi` — MSI, per-machine, needs admin
 2. Register the Claude Code hooks:
 
    ```powershell
@@ -100,8 +100,12 @@ rather paste it in by hand.
   traffic-light proportion throughout the drag, so the casing always fits the
   lamps exactly with no background showing beside them. No other edge or corner
   resizes — dragging anywhere else on the light moves it.
-- **Right-click** — settings, always-on-top toggle, rotate, size presets, reset
-  to green, hide to tray, quit.
+- **Right-click** — settings, always-on-top toggle, rotate, move to default
+  position, size presets, reset to green, hide to tray, quit.
+- **Default position** — the light goes to its default corner on first run, on
+  *Restore defaults*, and whenever you ask (*Move to default position* on the
+  light's menu, or *Move light there now* in the settings). Otherwise it stays
+  where you dragged it, remembered between runs.
 - **Tray icon** — show, hide, settings or quit. Hovering it shows the current
   status text and the session count.
 - **Auto-hide** — with no session running the light hides itself and reappears
@@ -145,6 +149,9 @@ preview each and a master volume.
 | Orientation | Vertical or horizontal |
 | Size | Long side of one light, 48–900 px; the short side follows automatically |
 | Caption each light with its project | The folder name under each light's lamps |
+| Default position | Which screen corner the light goes to, or centre |
+| Margin from the edges | 0–200 px in from the work area, so it clears the taskbar |
+| Default size | The size the light goes back to, kept apart from the live Size |
 | Always on top | Float above other windows |
 | Hide when no session is running | Auto-hide, and reappear when a session starts |
 | Click a light to focus its terminal | Raise the terminal the session is running in |
@@ -219,6 +226,21 @@ and the lamp size cannot drift apart — `sizeFor` goes one way for the window a
 across the short axis, and a caption always sits under a light's lamps, which
 puts it on the long axis when the lights are vertical and on the short axis when
 they are horizontal.
+
+The default position is a corner plus a margin rather than saved coordinates: a
+remembered x/y is off-screen as soon as the display setup changes. It is applied
+in Rust, because the corner has to be measured against the monitor's *work
+area* — the screen minus the taskbar — which the webview cannot see. A light
+placed bottom-right from JS would sit behind the taskbar. The frontend still
+drives it, since where a bottom or right corner puts the window depends on how
+big the window is, and only the frontend knows that.
+
+A caption is held to the width of the light above it. Left to size itself a
+light takes the width of its widest child, which is the caption: a long project
+name pushed the whole row wider than the window and the last light was clipped
+off. The window size is also rounded up rather than to nearest — three lights at
+the default size want 348.48px, and a window half a pixel short clips the last
+one, while half a pixel over is transparent margin on a transparent window.
 
 Lights are reconciled rather than rebuilt: a status change repaints the existing
 elements, so the lamp glow and the red pulse are not restarted on every light in

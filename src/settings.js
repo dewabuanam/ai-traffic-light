@@ -1,5 +1,7 @@
 import {
+  CORNERS,
   MAX_ALONG,
+  MAX_MARGIN,
   MIN_ALONG,
   clamp,
   defaults,
@@ -9,6 +11,7 @@ import {
 } from "./prefs.js";
 import { VOICES, VOICE_IDS, bindUnlock, play } from "./sound.js";
 
+const { invoke } = window.__TAURI__.core;
 const { getCurrentWindow } = window.__TAURI__.window;
 
 const appWindow = getCurrentWindow();
@@ -25,6 +28,12 @@ const el = {
   along: document.getElementById("along"),
   alongOut: document.getElementById("along-out"),
   showTitles: document.getElementById("show-titles"),
+  defaultCorner: document.getElementById("default-corner"),
+  defaultMargin: document.getElementById("default-margin"),
+  defaultMarginOut: document.getElementById("default-margin-out"),
+  defaultAlong: document.getElementById("default-along"),
+  defaultAlongOut: document.getElementById("default-along-out"),
+  goHome: document.getElementById("go-home"),
   alwaysOnTop: document.getElementById("always-on-top"),
   autoHide: document.getElementById("auto-hide"),
   clickFocus: document.getElementById("click-focus"),
@@ -48,8 +57,18 @@ for (const row of el.lampRows) {
   }
 }
 
+for (const [value, label] of Object.entries(CORNERS)) {
+  const option = document.createElement("option");
+  option.value = value;
+  option.textContent = label;
+  el.defaultCorner.append(option);
+}
+
 el.along.min = String(MIN_ALONG);
 el.along.max = String(MAX_ALONG);
+el.defaultAlong.min = String(MIN_ALONG);
+el.defaultAlong.max = String(MAX_ALONG);
+el.defaultMargin.max = String(MAX_MARGIN);
 
 /* ---------------- prefs -> form ---------------- */
 
@@ -74,6 +93,11 @@ function fill() {
   el.along.value = String(clamp(prefs.along, MIN_ALONG, MAX_ALONG));
   el.alongOut.textContent = `${el.along.value} px`;
   el.showTitles.checked = prefs.showTitles;
+  el.defaultCorner.value = prefs.defaultCorner;
+  el.defaultMargin.value = String(clamp(prefs.defaultMargin, 0, MAX_MARGIN));
+  el.defaultMarginOut.textContent = `${el.defaultMargin.value} px`;
+  el.defaultAlong.value = String(clamp(prefs.defaultAlong, MIN_ALONG, MAX_ALONG));
+  el.defaultAlongOut.textContent = `${el.defaultAlong.value} px`;
   el.alwaysOnTop.checked = prefs.alwaysOnTop;
   el.autoHide.checked = prefs.autoHide;
   el.clickFocus.checked = prefs.clickFocus;
@@ -144,6 +168,29 @@ el.showTitles.addEventListener("change", () => {
   commit();
 });
 
+el.defaultCorner.addEventListener("change", () => {
+  prefs.defaultCorner = el.defaultCorner.value;
+  commit();
+});
+
+el.defaultMargin.addEventListener("input", () => {
+  prefs.defaultMargin = Number(el.defaultMargin.value);
+  el.defaultMarginOut.textContent = `${el.defaultMargin.value} px`;
+  savePrefs(prefs);
+});
+
+el.defaultAlong.addEventListener("input", () => {
+  prefs.defaultAlong = Number(el.defaultAlong.value);
+  el.defaultAlongOut.textContent = `${el.defaultAlong.value} px`;
+  savePrefs(prefs);
+});
+
+// The light moves itself: where a bottom or right corner puts the window
+// depends on how big it is, and the light is what owns its size.
+el.goHome.addEventListener("click", () => {
+  invoke("send_light_home").catch((err) => console.error("send_light_home failed", err));
+});
+
 el.alwaysOnTop.addEventListener("change", () => {
   prefs.alwaysOnTop = el.alwaysOnTop.checked;
   commit();
@@ -162,6 +209,8 @@ el.clickFocus.addEventListener("change", () => {
 el.restore.addEventListener("click", () => {
   prefs = defaults();
   commit();
+  // Defaults include where the light belongs, so put it there.
+  invoke("send_light_home").catch((err) => console.error("send_light_home failed", err));
 });
 
 el.close.addEventListener("click", () => appWindow.close());
